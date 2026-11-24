@@ -1,0 +1,629 @@
+--- a/src/sstp-client.c
++++ b/src/sstp-client.c
+@@ -20,6 +20,7 @@
+ 
+ #include "sstp-private.h"
+ #include "sstp-client.h"
++#include "sstp-macos-trust.h"
+ 
+ /*! OpenSSL cipher suites
+  * 
+@@ -209,33 +210,21 @@
+ static void sstp_client_http_done(sstp_client_st *client, int status)
+ {
+     sstp_option_st *opts = &client->option;
+-    int vopts = SSTP_VERIFY_NONE;
+ 
+     if (SSTP_OKAY != status)
+     {
+         sstp_die("HTTP handshake with server failed", -1);
+     }
++
++    log_info("SSTP HTTP handshake accepted (HTTP 200)");
+ 
+     /* Free the handshake data */
+     sstp_http_free(client->http);
+     client->http = NULL;
+ 
+-    /* Set verify options */
+-    vopts = SSTP_VERIFY_NAME;
+-    if (opts->ca_cert || opts->ca_path)
+-    {
+-        vopts = SSTP_VERIFY_CERT;
+-    }
+-
+-    /* Verify the server certificate */
+-    status = sstp_verify_cert(client->stream, opts->host ?: opts->server, vopts);
+-    if (SSTP_OKAY != status)
+-    {
+-        if (!(SSTP_OPT_CERTWARN & client->option.enable))
+-            sstp_die("Verification of server certificate failed", -2);
+-        
+-        log_warn("Server certificated failed verification, ignoring");
+-    }
++    /* The TLS handshake has already verified the peer with Security.framework. */
++    if (SSTP_OKAY != sstp_verify_cert(client->stream, opts->host ?: opts->server, SSTP_VERIFY_CERT))
++        sstp_die("Verification of server certificate failed", -2);
+ 
+     /* Now we need to start the state-machine */
+     status = sstp_state_create(&client->state, client->stream,
+@@ -418,13 +407,10 @@
+     /* A likely condition */   
+     if (!opts->proxy) 
+     {
+-        /* Resolved name is the same as specified, then server is an ip-address */
+-        if (!strcmp(client->host.name, opts->server) &&
+-             opts->host != NULL) 
+-        {
+-            /* Use the host per --host option, if specified */
+-            strncpy(client->host.name, opts->host, 
+-                    sizeof(client->host.name)-1);
++        /* Use the profile hostname for HTTP even when the TCP target is an IP. */
++        if (opts->host != NULL)
++        {
++            strncpy(client->host.name, opts->host, sizeof(client->host.name)-1);
+         }
+         complete_cb = sstp_client_connected;
+     }
+@@ -455,72 +441,6 @@
+ done:
+ 
+     return ret;
+-}
+-
+-
+-/*!
+- * @brief Setup the CRL options
+- */
+-static status_t sstp_setup_crl_options(SSL_CTX *ctx, sstp_option_st *opt)
+-{
+-    int status = SSTP_FAIL;
+-
+-    X509_STORE *certstore = SSL_CTX_get_cert_store(ctx);
+-    if (!certstore)
+-    {
+-        log_err("Could not get certificate store");
+-        goto done;
+-    }
+-
+-    /* Configure the CRL directory if specified */
+-    if (opt->crl_path)
+-    {
+-        X509_LOOKUP *lookup = X509_STORE_add_lookup(certstore, X509_LOOKUP_hash_dir());
+-        if (!lookup)
+-        {
+-            log_err("Could get lookup structure");
+-            goto done;
+-        }
+-
+-        if (!X509_LOOKUP_add_dir(lookup, opt->crl_path, X509_FILETYPE_PEM))
+-        {
+-            log_err("Could not add directory");
+-            goto done;
+-        }
+-    }
+-
+-    /* Configure the CRL file if specified */
+-    if (opt->crl_file)
+-    {
+-        FILE *fp = fopen(opt->crl_file, "r");
+-        if (!fp)
+-        {
+-            log_err("Cannot open CRL file '%s'", opt->crl_file);
+-            goto done;
+-        }
+-
+-        X509_CRL *crl = PEM_read_X509_CRL(fp, NULL, NULL, NULL);
+-        if (!crl)
+-        {
+-            log_err("Cannot read CRL file '%s'", opt->crl_file);
+-            goto done;
+-        }
+-
+-        if (!X509_STORE_add_crl(certstore, crl))
+-        {
+-            log_err("Cannot add CRL to certificate store");
+-            goto done;
+-        }
+-    }
+-
+-    X509_STORE_set_flags(certstore, X509_V_FLAG_CRL_CHECK);
+-
+-    /* Success! */
+-    status = SSTP_OKAY;
+-
+-done:
+-
+-    return status;
+ }
+ 
+ 
+@@ -608,32 +528,8 @@
+         goto done;
+     }
+ 
+-    /* Configure the CA-Certificate or Directory */
+-    if (opt->ca_cert || opt->ca_path)
+-    {
+-        /* Look for certificates in the default certificate path */
+-        status = SSL_CTX_load_verify_locations(client->ssl_ctx,
+-                opt->ca_cert, opt->ca_path);
+-        if (status != 1)
+-        {
+-            log_err("Could not set default verify location");
+-            goto done;
+-        }
+-    }
+-
+-    /* Configure the CRL file or directory */
+-    if (opt->crl_file || opt->crl_path)
+-    {
+-        status = sstp_setup_crl_options(client->ssl_ctx, opt);
+-        if (status != SSTP_OKAY)
+-        {
+-            log_err("Could not configure CRL options");
+-            goto done;
+-        }
+-    }
+-
+-    /* OBS: In case of longer certificate chains than 1 */
+-    SSL_CTX_set_verify_depth(client->ssl_ctx, 9);
++    if (!sstp_macos_configure_tls(client->ssl_ctx, opt))
++        goto done;
+ 
+     /*! Success */
+     retval = SSTP_OKAY;
+@@ -876,17 +772,6 @@
+         sstp_die("Could not parse input arguments", -1);
+     }
+ 
+-    /* Check if we can access the runtime directory */
+-    if (access(SSTP_RUNTIME_DIR, F_OK))
+-    {
+-        ret = sstp_create_dir(SSTP_RUNTIME_DIR, option.priv_user, 
+-                option.priv_group, 0755);
+-        if (ret != 0)
+-        {
+-            log_warn("Could not access or create runtime directory");
+-        }
+-    }
+-
+     /* Create the privilege separation directory */
+     if (option.priv_dir && access(option.priv_dir, F_OK))
+     {
+--- a/src/sstp-option.c
++++ b/src/sstp-option.c
+@@ -13,6 +13,7 @@
+ #include <stdarg.h>
+ #include <string.h>
+ #include <unistd.h>
++#include <openssl/crypto.h>
+ 
+ #include "sstp-private.h"
+ 
+@@ -400,12 +401,27 @@
+         ctx->priv_dir = strdup(SSTP_RUNTIME_DIR);
+     }
+ 
+-    /* If not specified, use the system CA path */
+-    if (!ctx->ca_path) 
+-    {
+-        ctx->ca_path = strdup(SYSTEM_CA_PATH);
+-    }
+-
++    /* The macOS helper supplies the password over a private pipe. */
++    const char *password_stdin = getenv("SSTP_PASSWORD_STDIN");
++    if (password_stdin && strcmp(password_stdin, "1") == 0)
++    {
++        char secret[257];
++        if (ctx->password || !fgets(secret, sizeof(secret), stdin))
++            return -1;
++
++        char *newline = strchr(secret, '\n');
++        if (!newline || newline == secret)
++        {
++            OPENSSL_cleanse(secret, sizeof(secret));
++            return -1;
++        }
++        *newline = '\0';
++        ctx->password = strdup(secret);
++        OPENSSL_cleanse(secret, sizeof(secret));
++        if (!ctx->password)
++            return -1;
++    }
++
+     /* At least one argument is required */
+     if (argc <= optind)
+     {
+@@ -418,8 +434,23 @@
+         ctx->enable |= SSTP_OPT_NOPLUGIN;
+     }
+ 
+-    /* Copy the server argument */
++    /* Keep the transport address and TLS identity separate. Use the original
++       hostname, without the port, for SNI and certificate verification. */
+     ctx->server = strdup(argv[optind++]);
++    if (!ctx->server)
++        return -1;
++
++    if (!ctx->host)
++    {
++        sstp_url_st *endpoint = NULL;
++        if (sstp_url_parse(&endpoint, ctx->server) != SSTP_OKAY)
++            return -1;
++
++        ctx->host = endpoint->host ? strdup(endpoint->host) : NULL;
++        sstp_url_free(endpoint);
++        if (!ctx->host || !*ctx->host)
++            return -1;
++    }
+ 
+     /* PPPD options to follow */
+     ctx->pppdargc = argc - optind;
+--- a/src/sstp-pppd.c
++++ b/src/sstp-pppd.c
+@@ -10,6 +10,7 @@
+ 
+ #include <config.h>
+ #include <errno.h>
++#include <limits.h>
+ #include <stdlib.h>
+ #include <string.h>
+ #include <unistd.h>
+@@ -70,7 +71,7 @@
+     int del_file;
+ 
+     /*< The temporary file name */
+-    char tmpfile[64];
++    char tmpfile[PATH_MAX];
+ 
+     /*< The time pppd was terminated */
+     unsigned long t_end;
+@@ -86,10 +87,77 @@
+ 
+     /*< First read from pppd */
+     bool first;
++
++    /*< PPP negotiation messages already logged for each direction */
++    uint32_t logged[2];
+ };
+ 
+ 
+ static status_t ppp_process_data(sstp_pppd_st *ctx);
++
++/* Log only protocol milestones. PPP authentication packets can contain secrets. */
++static void ppp_log_negotiation(sstp_pppd_st *ctx, const uint8_t *data, int len, bool received)
++{
++    static const char *const configuration[] = {
++        NULL, "Configure-Request", "Configure-Ack", "Configure-Nak", "Configure-Reject",
++        "Terminate-Request", "Terminate-Ack", "Code-Reject", "Protocol-Reject",
++    };
++    static const char *const authentication[] = {
++        NULL, "Challenge", "Response", "Success", "Failure",
++    };
++    const char *protocol;
++    const char *message;
++    unsigned int bit;
++    uint16_t code;
++
++    if (len >= 2 && data[0] == 0xff && data[1] == 0x03)
++    {
++        data += 2;
++        len -= 2;
++    }
++    if (len < 6)
++        return;
++
++    code = ((uint16_t)data[0] << 8) | data[1];
++    unsigned int type = data[2];
++    unsigned int length = ((unsigned int)data[4] << 8) | data[5];
++    if (!type || length < 4 || length > (unsigned int)len - 2)
++        return;
++
++    switch (code)
++    {
++        case 0xc021: /* LCP */
++            if (type >= sizeof(configuration) / sizeof(configuration[0]))
++                return;
++            protocol = "LCP";
++            message = configuration[type];
++            bit = type - 1;
++            break;
++        case 0xc223: /* CHAP */
++            if (type >= sizeof(authentication) / sizeof(authentication[0]))
++                return;
++            protocol = "CHAP";
++            message = authentication[type];
++            bit = 8 + type - 1;
++            break;
++        case 0x8021: /* IPCP */
++            if (type > 6)
++                return;
++            protocol = "IPCP";
++            message = configuration[type];
++            bit = 12 + type - 1;
++            break;
++        default:
++            return;
++    }
++
++    uint32_t mask = (uint32_t)1 << bit;
++    unsigned int direction = received ? 0 : 1;
++    if (ctx->logged[direction] & mask)
++        return;
++    ctx->logged[direction] |= mask;
++    log_info("PPP %s %s %s", received ? "server -> client" : "client -> server", protocol, message);
++}
+ 
+ 
+ /*!
+@@ -377,6 +445,7 @@
+             sstp_pppd_ipup(ctx, tx);
+         }
+ 
++        ppp_log_negotiation(ctx, sstp_pkt_data(tx), max, false);
+         sstp_pkt_trace(tx, SSTP_DIR_SEND);
+ 
+         /* Send a PPP frame */
+@@ -462,6 +531,8 @@
+     int flen = 0;
+     int ret  = 0;
+ 
++    ppp_log_negotiation(ctx, (const uint8_t *)buf, len, true);
++
+     /* Get the maximum size of the frame */
+     flen = (len << 1) + 4;
+ 
+@@ -509,7 +580,7 @@
+     /* Launch PPPd, unless PPPd launched us */
+     if (!(SSTP_OPT_NOLAUNCH & opts->enable))
+     {
+-        const char *args[20];
++        const char *args[12 + opts->pppdargc];
+         int i = 0;
+         int j = 0;
+         char speed[10];
+@@ -539,34 +610,44 @@
+         /* Write the password to file */
+         if (opts->password)
+         {
+-            int fd = 0;
+-            char buff[255];
+-            /* 077, all new files created will only be read-/write- able by current user */
+-            mode_t mode = umask(S_IRWXG | S_IRWXO);
+-
+-            sprintf(ctx->tmpfile, "%s/sstp-pppd.XXXXXX", SSTP_TMP_PATH);
+-
+-            /* Create a file to keep the options */
+-            fd = mkstemp(ctx->tmpfile);
+-            if (fd <= 0)
++            const char *folder = getenv("SSTP_OPTIONS_DIR");
++            if (!folder)
++                folder = SSTP_TMP_PATH;
++            int length = snprintf(ctx->tmpfile, sizeof(ctx->tmpfile), "%s/sstp-pppd.XXXXXX", folder);
++            if (length < 0 || length >= sizeof(ctx->tmpfile))
++                goto done;
++
++            int fd = mkstemp(ctx->tmpfile);
++            if (fd < 0)
+             {
+-                log_err("Could not create pppd script");
++                log_err("Could not create pppd options");
+                 goto done;
+             }
+ 
+-            /* Restore the umask */
+-            umask(mode);
+-
+-            /* Dump password to temporary file */
+-            j = snprintf(buff, sizeof(buff), "password \"%s\"\n", opts->password);
+-            if (write(fd, buff, j) != j)
++            FILE *file = fdopen(fd, "w");
++            if (!file)
+             {
+-                log_warn("Could not write password to file");
++                close(fd);
++                unlink(ctx->tmpfile);
++                goto done;
+             }
+ 
+-            /* Close file, and enable check for auth */
++            fputs("password \"", file);
++            for (const unsigned char *p = (const unsigned char *)opts->password; *p; ++p)
++            {
++                if (*p == '\\' || *p == '"')
++                    fputc('\\', file);
++                fputc(*p, file);
++            }
++            fputs("\"\n", file);
++            if (fclose(file) == EOF)
++            {
++                unlink(ctx->tmpfile);
++                log_err("Could not write pppd options");
++                goto done;
++            }
++
+             ctx->auth_check = 1;
+-            close(fd);
+ 
+             /* Append the file argument to pppd */
+             args[i++] = "file";
+--- a/src/sstp-stream.c
++++ b/src/sstp-stream.c
+@@ -12,12 +12,14 @@
+ #include <arpa/inet.h>
+ #include <errno.h>
+ #include <fcntl.h>
++#include <net/if.h>
+ #include <stdlib.h>
+ #include <stdio.h>
+ #include <sys/socket.h>
+ #include <string.h>
+ #include <unistd.h>
+ #include <openssl/ssl.h>
++#include <openssl/err.h>
+ 
+ #include "sstp-private.h"
+ 
+@@ -499,9 +501,13 @@
+             : 4 ;
+ 
+         /* Try to read from the SSL socket */
++        ERR_clear_error();
++        errno = 0;
+         int ret = SSL_read(ctx->ssl, buf->data + buf->off,
+                 buf->len - buf->off);
+-        switch (SSL_get_error(ctx->ssl, ret))
++        int saved_errno = errno;
++        int error = SSL_get_error(ctx->ssl, ret);
++        switch (error)
+         {
+         case SSL_ERROR_NONE:
+             buf->off += ret;
+@@ -519,9 +525,30 @@
+             status = SSTP_INPROG;
+             goto done;
+         
++        case SSL_ERROR_ZERO_RETURN:
++            log_warn("The VPN server closed the TLS connection");
++            goto done;
++
++        case SSL_ERROR_SYSCALL:
++            log_err("TLS transport failed: %s",
++                    saved_errno ? strerror(saved_errno) : "unexpected end of stream");
++            goto done;
++
+         default:
+-            log_err("Unrecoverable SSL error");
+-            goto done;
++        {
++            unsigned long failure = ERR_peek_last_error();
++            char description[256];
++            if (failure)
++            {
++                ERR_error_string_n(failure, description, sizeof(description));
++                log_err("TLS read failed: %s", description);
++            }
++            else
++            {
++                log_err("TLS read failed (SSL_get_error: %d)", error);
++            }
++            goto done;
++        }
+         }
+ 
+     } while (buf->off < sstp_pkt_len(buf));
+@@ -739,7 +766,20 @@
+     /* In case connect timed out */
+     if (EV_TIMEOUT & event)
+     {
+-        log_err("Connect timed out");
++        log_err("TCP connect timed out");
++        goto done;
++    }
++
++    int socket_error = 0;
++    socklen_t length = sizeof(socket_error);
++    if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &socket_error, &length) != 0)
++    {
++        log_err("TCP connect status unavailable: %s", strerror(errno));
++        goto done;
++    }
++    if (socket_error != 0)
++    {
++        log_err("TCP connect failed: %s", strerror(socket_error));
+         goto done;
+     }
+ 
+@@ -773,6 +813,23 @@
+     {          
+         log_err("Could not create socket");
+         goto done;
++    }
++
++    const char *interface = getenv("SSTP_BIND_INTERFACE");
++    if (interface)
++    {
++        unsigned int index = if_nametoindex(interface);
++        if (addr->sa_family != AF_INET || index == 0)
++        {
++            log_err("Invalid IPv4 transport interface: %s", interface);
++            goto done;
++        }
++        if (setsockopt(stream->ssock, IPPROTO_IP, IP_BOUND_IF, &index, sizeof(index)) != 0)
++        {
++            log_err("Could not bind the SSTP socket to %s: %s", interface, strerror(errno));
++            goto done;
++        }
++        log_info("SSTP transport socket bound to %s", interface);
+     }
+ 
+     stream->rsock = dup(stream->ssock);
+@@ -823,7 +880,12 @@
+         return SSTP_INPROG;
+     }
+ 
+-    /* Success */
++    if (sstp_stream_setup(stream) != SSTP_OKAY)
++    {
++        log_err("Could not configure SSL socket");
++        goto done;
++    }
++    complete(stream, NULL, arg, SSTP_CONNECTED);
+     return SSTP_OKAY;
+ 
+ done:
+--- a/src/sstp-task.c
++++ b/src/sstp-task.c
+@@ -17,6 +17,7 @@
+ #endif
+ #include <stdlib.h>
+ #include <signal.h>
++#include <stdio.h>
+ #include <string.h>
+ #include <sys/types.h>
+ #include <sys/socket.h>
+@@ -94,6 +95,7 @@
+ 
+ status_t sstp_task_new(sstp_task_st **task, sstp_task_t type)
+ {
++    status_t status = SSTP_OKAY;
+     /* Allocate task structure */
+     *task = calloc(1, sizeof(sstp_task_st));
+     if (*task == NULL)
+@@ -105,15 +107,22 @@
+     switch (type)
+     {
+     case SSTP_TASK_USEPIPE:
+-        sstp_setup_pipe(*task);
++        status = sstp_setup_pipe(*task);
+         break;
+ 
+     case SSTP_TASK_USEPTY:
+-        sstp_setup_pty(*task);
++        status = sstp_setup_pty(*task);
+         break;
+ 
+     default:
+         break;
++    }
++
++    if (status != SSTP_OKAY)
++    {
++        free(*task);
++        *task = NULL;
++        return status;
+     }
+ 
+     /* Save the flags */
+@@ -164,8 +173,8 @@
+         /* Execute the command given */
+         execv(argv[0], (char**) &argv[1]);
+ 
+-        /* If we ever could reach here ... */
+-        exit(-1);
++        fprintf(stderr, "Could not start %s: %s\n", argv[0], strerror(errno));
++        _exit(127);
+ 
+     default:
+         
