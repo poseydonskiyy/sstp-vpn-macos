@@ -22,11 +22,11 @@ struct VPNRoute: Codable, Hashable {
             let parts = line.split(whereSeparator: \.isWhitespace).map(String.init)
             if parts.isEmpty || parts[0].hasPrefix("#") { continue }
             guard parts.count == 2, let route = parse(kind: parts[0], target: parts[1]) else {
-                throw Failure("Строка \(index + 1): укажите host и IPv4 или net и подсеть IPv4 с префиксом от /1 до /32.")
+                throw Failure(L("Строка \(index + 1): укажите host и IPv4 или net и подсеть IPv4 с префиксом от /1 до /32."))
             }
             if seen.insert(route).inserted { routes.append(route) }
         }
-        guard routes.count <= 128 else { throw Failure("Можно добавить до 128 маршрутов.") }
+        guard routes.count <= 128 else { throw Failure(L("Можно добавить до 128 маршрутов.")) }
         return routes
     }
 
@@ -69,10 +69,10 @@ enum PPPEncryption: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .none: "Выключено"
-        case .optional: "По согласованию"
-        case .required: "Обязательно"
-        case .maximum: "Обязательно (128 бит)"
+        case .none: L("Выключено")
+        case .optional: L("По согласованию")
+        case .required: L("Обязательно")
+        case .maximum: L("Обязательно (128 бит)")
         }
     }
 
@@ -114,8 +114,8 @@ enum ServerTrustMode: String, Codable, CaseIterable, Identifiable {
     var id: Self { self }
     var title: String {
         switch self {
-        case .system: "Системное доверие macOS"
-        case .custom: "Пользовательский комплект CA"
+        case .system: L("Системное доверие macOS")
+        case .custom: L("Пользовательский комплект CA")
         }
     }
 }
@@ -128,7 +128,7 @@ struct DNSRule: Codable {
         self.suffix = try Profile.normalizedDNSSuffix(suffix)
         guard (1...8).contains(servers.count),
               servers.allSatisfy({ VPNRoute.ipv4($0).map { $0 != 0 && $0 < 0xe0000000 } == true }) else {
-            throw Failure("Укажите от 1 до 8 IPv4-адресов DNS-серверов через запятую.")
+            throw Failure(L("Укажите от 1 до 8 IPv4-адресов DNS-серверов через запятую."))
         }
         self.servers = servers
     }
@@ -159,11 +159,11 @@ struct Profile: Codable {
 
     func validateAuthentication() throws {
         guard !authentication.isEmpty, Set(authentication).count == authentication.count else {
-            throw Failure("Выберите хотя бы один метод аутентификации PPP.")
+            throw Failure(L("Выберите хотя бы один метод аутентификации PPP."))
         }
         if pppEncryption == .required || pppEncryption == .maximum {
             guard authentication.contains(.mschapv2) else {
-                throw Failure("Шифрование PPP Required или Maximum требует MS‑CHAPv2. Проверьте EncryptionLevel в профиле Windows.")
+                throw Failure(L("Шифрование PPP Required или Maximum требует MS‑CHAPv2. Проверьте EncryptionLevel в профиле Windows."))
             }
         }
     }
@@ -173,7 +173,7 @@ struct Profile: Codable {
         guard usesSystemRouteForServer, let address = serverIPv4Override?.trimmingCharacters(in: .whitespacesAndNewlines),
               !address.isEmpty else { return nil }
         guard let ip = VPNRoute.ipv4(address), ip != 0, ip < 0xe0000000 else {
-            throw Failure("Укажите корректный IPv4-адрес для подключения к VPN-серверу.")
+            throw Failure(L("Укажите корректный IPv4-адрес для подключения к VPN-серверу."))
         }
         return address
     }
@@ -188,25 +188,25 @@ struct Profile: Codable {
     static func normalizedDNSSuffix(_ value: String) throws -> String {
         let suffix = value.hasSuffix(".") ? String(value.dropLast()) : value
         guard isDNSName(suffix), VPNRoute.ipv4(suffix) == nil else {
-            throw Failure("Укажите корректное доменное имя для DNS-суффикса.")
+            throw Failure(L("Укажите корректное доменное имя для DNS-суффикса."))
         }
         return suffix.lowercased()
     }
 
     func validateEndpoint() throws {
         guard Self.isDNSName(server), let number = Int(port), port == String(number), (1...65535).contains(number) else {
-            throw Failure("Введите имя сервера или IPv4 и порт от 1 до 65535.")
+            throw Failure(L("Введите имя сервера или IPv4 и порт от 1 до 65535."))
         }
     }
 
     func validatedDNSRules() throws -> [DNSRule] {
         let rules = dnsRules ?? []
-        guard rules.count <= 32 else { throw Failure("Профиль поддерживает до 32 DNS-правил.") }
+        guard rules.count <= 32 else { throw Failure(L("Профиль поддерживает до 32 DNS-правил.")) }
         var seen = Set<String>()
         return try rules.map { rule in
             let validated = try DNSRule(suffix: rule.suffix, servers: rule.servers)
             guard seen.insert(validated.suffix).inserted else {
-                throw Failure("DNS-правило для \(validated.suffix) уже задано.")
+                throw Failure(L("DNS-правило для \(validated.suffix) уже задано."))
             }
             return validated
         }
@@ -217,6 +217,7 @@ struct VPNRequest: Codable {
     let profile: Profile
     let password: String
     let certificates: Data
+    var language: AppLanguage? = nil
 
     func validate() throws -> [VPNRoute] {
         try profile.validateEndpoint()
@@ -230,7 +231,7 @@ struct VPNRequest: Codable {
               certificates.count <= 256 * 1024,
               certificates.isEmpty == (profile.trustMode == .system),
               profile.routes.utf8.count <= 24 * 1024 else {
-            throw Failure("Проверьте логин, пароль, список маршрутов и комплект сертификатов.")
+            throw Failure(L("Проверьте логин, пароль, список маршрутов и комплект сертификатов."))
         }
         return try VPNRoute.parse(profile.routes)
     }

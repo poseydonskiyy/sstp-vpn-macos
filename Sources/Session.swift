@@ -25,12 +25,12 @@ final class PrivilegedSession {
 
     private func run(_ request: VPNRequest, onEvent: (VPNEvent) -> Void) throws {
         guard let helper = Bundle.main.url(forAuxiliaryExecutable: "sstp-network") else {
-            throw Failure("Установочный пакет повреждён: отсутствует сетевой компонент.")
+            throw Failure(L("Установочный пакет повреждён: отсутствует сетевой компонент."))
         }
         var auth: AuthorizationRef?
         let created = AuthorizationCreate(nil, nil, [], &auth)
         guard created == errAuthorizationSuccess, let auth else {
-            throw Failure("Не удалось запросить разрешение администратора (\(created)).")
+            throw Failure(L("Не удалось запросить разрешение администратора (\(created))."))
         }
         defer { AuthorizationFree(auth, [.destroyRights]) }
 
@@ -39,11 +39,11 @@ final class PrivilegedSession {
             SSTPStartAuthorized(auth, path!, &pipe)
         }
         if status == errAuthorizationCanceled {
-            onEvent(VPNEvent(type: "log", message: "Запрос разрешения администратора отменён."))
+            onEvent(VPNEvent(type: "log", message: L("Запрос разрешения администратора отменён.")))
             return
         }
         guard status == errAuthorizationSuccess, let pipe else {
-            throw Failure("macOS не запустила сетевой компонент (\(status)).")
+            throw Failure(L("macOS не запустила сетевой компонент (\(status))."))
         }
 
         let fd = fileno(pipe)
@@ -82,7 +82,7 @@ final class PrivilegedSession {
             if finished { break }
             if pending.count > 65_536 { pending.removeAll() }
         }
-        if !finished { throw Failure("Связь с сетевым компонентом прервалась.") }
+        if !finished { throw Failure(L("Связь с сетевым компонентом прервалась.")) }
     }
 
     private func writeLine(_ data: Data, to fd: Int32) throws {
@@ -92,7 +92,7 @@ final class PrivilegedSession {
             while sent < bytes.count {
                 let count = Darwin.write(fd, start.advanced(by: sent), bytes.count - sent)
                 if count < 0, errno == EINTR { continue }
-                guard count > 0 else { throw Failure("Не удалось передать данные сетевому компоненту.") }
+                guard count > 0 else { throw Failure(L("Не удалось передать данные сетевому компоненту.")) }
                 sent += count
             }
         }

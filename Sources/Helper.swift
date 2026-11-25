@@ -122,7 +122,7 @@ private struct IPv6RejectRoute {
 
 private func routeTable(_ family: String) throws -> [[Substring]] {
     let table = try capture("/usr/sbin/netstat", ["-rn", "-f", family])
-    guard table.status == 0 else { throw Failure("Не удалось прочитать таблицу маршрутов \(family).") }
+    guard table.status == 0 else { throw Failure(L("Не удалось прочитать таблицу маршрутов \(family).")) }
     return table.text.split(separator: "\n").map { $0.split(whereSeparator: \.isWhitespace) }
         .filter { $0.count >= 4 }
 }
@@ -144,7 +144,7 @@ private func waitForPrimaryIPv4(_ interface: String, stop: StopSignal) throws {
         }) { return }
         usleep(125_000)
     }
-    throw Failure("macOS не выбрала \(interface) основным интерфейсом IPv4 (текущий: \(selected ?? "нет")).")
+    throw Failure(L("macOS не выбрала \(interface) основным интерфейсом IPv4 (текущий: \(selected ?? L("не найден")))."))
 }
 
 private func isTunnel(_ name: String) -> Bool {
@@ -164,7 +164,7 @@ private func resolve(_ server: String) throws -> [String] {
         let ip = line.dropFirst("ip_address:".count).trimmingCharacters(in: .whitespaces)
         if VPNRoute.ipv4(ip) != nil, !addresses.contains(ip) { addresses.append(ip) }
     }
-    guard !addresses.isEmpty else { throw Failure("DNS не вернул IPv4-адрес для \(server).") }
+    guard !addresses.isEmpty else { throw Failure(L("DNS не вернул IPv4-адрес для \(server).")) }
     return addresses
 }
 
@@ -185,9 +185,9 @@ private func add(_ rule: InstalledRoute, to owned: inout [InstalledRoute]) throw
         let scopeDescription = rule.scope.map { " (\($0))" } ?? ""
         emit("log", "\(rule.route.description) → \(rule.gateway ?? rule.interface)\(scopeDescription)")
     } else if rule.matches(try rule.current()) {
-        emit("log", "\(rule.route.description) → \(rule.interface) · маршрут уже есть")
+        emit("log", L("\(rule.route.description) → \(rule.interface) · маршрут уже есть"))
     } else {
-        throw Failure("Не удалось добавить \(rule.route.description): \(result.text.trimmingCharacters(in: .whitespacesAndNewlines))")
+        throw Failure(L("Не удалось добавить \(rule.route.description): \(result.text.trimmingCharacters(in: .whitespacesAndNewlines))"))
     }
 }
 
@@ -195,8 +195,8 @@ private func verifyTransportRoute(_ route: InstalledRoute) throws {
     let info = try route.current()
     guard route.matches(info) else {
         let observed = [info["destination"], info["interface"], info["flags"]].compactMap { $0 }.joined(separator: " ")
-        let details = observed.isEmpty ? "маршрут отсутствует" : observed
-        throw Failure("Маршрут до VPN-сервера \(route.route.address) через \(route.interface) не подтверждён (\(details)).")
+        let details = observed.isEmpty ? L("маршрут отсутствует") : observed
+        throw Failure(L("Маршрут до VPN-сервера \(route.route.address) через \(route.interface) не подтверждён (\(details))."))
     }
 }
 
@@ -205,12 +205,12 @@ private func pinTransportRoute(to address: String, interface: String, owned: ino
     let flags = info["flags"] ?? ""
     guard info["interface"] == interface, flags.contains("UP"),
           !flags.contains("REJECT"), !flags.contains("BLACKHOLE") else {
-        throw Failure("VPN-сервер \(address) недоступен через \(interface).")
+        throw Failure(L("VPN-сервер \(address) недоступен через \(interface)."))
     }
     var gateway: String?
     if flags.contains("GATEWAY") {
         guard let address = info["gateway"], VPNRoute.ipv4(address).map({ $0 != 0 }) == true else {
-            throw Failure("Не найден IPv4-узел для маршрута через \(interface).")
+            throw Failure(L("Не найден IPv4-узел для маршрута через \(interface)."))
         }
         gateway = address
     }
@@ -252,7 +252,7 @@ private func preparePPPOptions() throws {
                                             attributes: [.posixPermissions: 0o755])
     let fd = open("/etc/ppp/options", O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0o644)
     if fd >= 0 { close(fd); return }
-    if errno != EEXIST { throw Failure("Не удалось подготовить /etc/ppp/options для pppd.") }
+    if errno != EEXIST { throw Failure(L("Не удалось подготовить /etc/ppp/options для pppd.")) }
 }
 
 private final class PeerDNS {
@@ -284,7 +284,7 @@ private final class PeerDNS {
 
 private func installDNSRule(_ rule: DNSRule, search: Bool, key: CFString) throws -> SCDynamicStore {
     guard let store = SCDynamicStoreCreate(nil, "SSTP VPN DNS" as CFString, nil, nil) else {
-        throw Failure("Не удалось открыть DNS-настройки macOS.")
+        throw Failure(L("Не удалось открыть DNS-настройки macOS."))
     }
     var settings: [String: Any] = [
         kSCPropNetDNSServerAddresses as String: rule.servers,
@@ -297,7 +297,7 @@ private func installDNSRule(_ rule: DNSRule, search: Bool, key: CFString) throws
         settings["SupplementalMatchDomainsNoSearch"] = 1
     }
     guard SCDynamicStoreAddTemporaryValue(store, key, settings as CFDictionary) else {
-        throw Failure("macOS отклонила временные DNS-настройки (\(SCError())).")
+        throw Failure(L("macOS отклонила временные DNS-настройки (\(SCError()))."))
     }
     return store
 }
@@ -345,22 +345,22 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
     let fullTunnel = request.profile.fullTunnel == true
     let requestPeerDNS = fullTunnel || peerSuffix != nil || dnsRules.isEmpty
     guard let executable = Engine.executable else {
-        throw Failure("В приложении отсутствует сетевой компонент sstpc.")
+        throw Failure(L("В приложении отсутствует сетевой компонент sstpc."))
     }
     if request.profile.trustMode == .custom, try !Certificates.parse(request.certificates).allSatisfy(\.current) {
-        throw Failure("Замените сертификаты с истёкшим или ещё не начавшимся сроком действия.")
+        throw Failure(L("Замените сертификаты с истёкшим или ещё не начавшимся сроком действия."))
     }
     let lock = open("/var/run/ru.sstpgui.mac.lock", O_CREAT | O_NOFOLLOW | O_RDWR | O_CLOEXEC, 0o600)
-    guard lock >= 0 else { throw Failure("Не удалось создать блокировку VPN в /var/run.") }
+    guard lock >= 0 else { throw Failure(L("Не удалось создать блокировку VPN в /var/run.")) }
     defer { close(lock) }
-    guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Failure("Клиент SSTP уже подключается или работает.") }
+    guard flock(lock, LOCK_EX | LOCK_NB) == 0 else { throw Failure(L("Клиент SSTP уже подключается или работает.")) }
 
     let defaults = fullTunnel
         ? try routeTable("inet") + routeTable("inet6")
         : ((try? routeTable("inet")) ?? []) + ((try? routeTable("inet6")) ?? [])
     if let other = defaults.first(where: { isUsableGlobalDefault($0) && isTunnel(String($0[3])) }) {
-        let message = "Обнаружен общий маршрут по умолчанию через туннель \(other[3]) (\(other[2]))."
-        if fullTunnel { throw Failure(message + " Отключите его перед включением полного режима.") }
+        let message = L("Обнаружен общий маршрут по умолчанию через туннель \(other[3]) (\(other[2])).")
+        if fullTunnel { throw Failure(message + L(" Отключите его перед включением полного режима.")) }
         emit("log", message)
     }
 
@@ -374,7 +374,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
     var directoryTemplate = Array("/private/var/run/sstpgui.XXXXXXXX".utf8CString)
     guard let directory = directoryTemplate.withUnsafeMutableBufferPointer({ buffer in
         mkdtemp(buffer.baseAddress!).map { String(cString: $0) }
-    }) else { throw Failure("Не удалось создать временную папку для сертификатов.") }
+    }) else { throw Failure(L("Не удалось создать временную папку для сертификатов.")) }
     let bundle = URL(fileURLWithPath: directory).appendingPathComponent("ca.pem")
     defer {
         for entry in dnsStores {
@@ -387,7 +387,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
                     if deleted.status != 0 { throw Failure(deleted.text.trimmingCharacters(in: .whitespacesAndNewlines)) }
                 }
             } catch {
-                emit("log", "Не удалось восстановить маршрут IPv6 \(guardRoute.network)/1: \(error.localizedDescription)")
+                emit("log", L("Не удалось восстановить маршрут IPv6 \(guardRoute.network)/1: \(error.localizedDescription)"))
             }
         }
         for rule in owned.reversed() {
@@ -400,10 +400,10 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
                 }
                 let deleted = try capture(routePath, ["-n", "delete", "-inet"] + rule.selection + rule.nextHop)
                 if deleted.status != 0, rule.matches(try rule.current()) {
-                    emit("log", "Не удалось удалить \(rule.route.description): \(deleted.text.trimmingCharacters(in: .whitespacesAndNewlines))")
+                    emit("log", L("Не удалось удалить \(rule.route.description): \(deleted.text.trimmingCharacters(in: .whitespacesAndNewlines))"))
                 }
             } catch {
-                emit("log", "Не удалось проверить маршрут \(rule.route.description).")
+                emit("log", L("Не удалось проверить маршрут \(rule.route.description)."))
             }
         }
         if process.isRunning {
@@ -431,7 +431,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
     let profile = request.profile
     let systemRoute = profile.usesSystemRouteForServer
     let overrideIPv4 = try profile.transportIPv4()
-    trace.event("L7 DNS", overrideIPv4 == nil ? "Разрешение имени \(profile.server)." : "Используется заданный IPv4.", next: .dns)
+    trace.event("L7 DNS", overrideIPv4 == nil ? L("Разрешение имени \(profile.server).") : L("Используется заданный IPv4."), next: .dns)
     let ips = try overrideIPv4.map { [$0] } ?? resolve(profile.server)
     let gateway = systemRoute || fullTunnel ? nil : try physicalGateway()
     let transportRoute: InstalledRoute?
@@ -439,13 +439,13 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
     if fullTunnel {
         let ip = ips[0]
         guard !routes.contains(where: { $0.kind == "host" && $0.contains(ip) }) else {
-            throw Failure("Маршрут host \(ip) совпадает с адресом VPN-сервера.")
+            throw Failure(L("Маршрут host \(ip) совпадает с адресом VPN-сервера."))
         }
         let routeInterface = try routeInfo(ip)["interface"] ?? ""
         let interface = physical(routeInterface) ? routeInterface : try physicalGateway()?.interface
-        guard let interface else { throw Failure("Не найден обычный сетевой маршрут до \(ip).") }
+        guard let interface else { throw Failure(L("Не найден обычный сетевой маршрут до \(ip).")) }
         transportRoute = try pinTransportRoute(to: ip, interface: interface, owned: &owned)
-        trace.event("L3 IPv4", "Маршрут до VPN-сервера через \(interface).")
+        trace.event("L3 IPv4", L("Маршрут до VPN-сервера через \(interface)."))
     } else {
         transportRoute = nil
     }
@@ -453,14 +453,14 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         try stop.check()
         if systemRoute {
             guard !routes.contains(where: { $0.contains(ip) }) else {
-                throw Failure("Маршрут через SSTP перекрывает адрес VPN-сервера \(ip).")
+                throw Failure(L("Маршрут через SSTP перекрывает адрес VPN-сервера \(ip)."))
             }
             let interface = try routeInfo(ip)["interface"]
-            trace.event("L3 IPv4", "Маршрут до \(ip) · системный\(interface.map { " (\($0))" } ?? "").")
+            trace.event("L3 IPv4", L("Маршрут до \(ip) · системный\(interface.map { " (\($0))" } ?? "")."))
             continue
         }
         if routes.contains(where: { $0.kind == "host" && $0.contains(ip) }) {
-            throw Failure("Маршрут host \(ip) совпадает с адресом VPN-сервера.")
+            throw Failure(L("Маршрут host \(ip) совпадает с адресом VPN-сервера."))
         }
         let info = try routeInfo(ip)
         let nic = info["interface"] ?? ""
@@ -477,7 +477,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
             try add(InstalledRoute(route: VPNRoute(kind: "host", destination: ip),
                                    interface: gateway.interface, gateway: gateway.gateway), to: &owned)
         } else {
-            throw Failure("Не найден обычный сетевой маршрут до \(ip).")
+            throw Failure(L("Не найден обычный сетевой маршрут до \(ip)."))
         }
     }
 
@@ -509,9 +509,9 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
     if requestPeerDNS { arguments.append("usepeerdns") }
     arguments += profile.pppEncryption?.options ?? []
     process.arguments = arguments
-    trace.event("L4 TCP", "Начинается соединение с \(target):\(profile.port).", next: .tcp)
-    trace.event("TLS", "Проверка сертификата · \(profile.trustMode.title).")
-    trace.event("L2 PPP", "Методы аутентификации · \(profile.authentication.map(\.title).joined(separator: ", ")).")
+    trace.event("L4 TCP", L("Начинается соединение с \(target):\(profile.port)."), next: .tcp)
+    trace.event("TLS", L("Проверка сертификата · \(profile.trustMode.title)."))
+    trace.event("L2 PPP", L("Методы аутентификации · \(profile.authentication.map(\.title).joined(separator: ", "))."))
     try passwordPipe.fileHandleForWriting.write(contentsOf: Data((request.password + "\n").utf8))
     try passwordPipe.fileHandleForWriting.close()
     try process.run()
@@ -529,9 +529,9 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         usleep(250_000)
     }
     guard !tunnel.isEmpty else {
-        throw Failure("Интерфейс PPP не получил IPv4 за 45 секунд. Этап: \(trace.pendingLabel).")
+        throw Failure(L("Интерфейс PPP не получил IPv4 за 45 секунд. Этап: \(trace.pendingLabel)."))
     }
-    trace.event("L3 IPv4", "\(tunnel) получил IPv4. Настройка маршрутов и DNS.", next: .routing)
+    trace.event("L3 IPv4", L("\(tunnel) получил IPv4. Настройка маршрутов и DNS."), next: .routing)
 
     if fullTunnel {
         try waitForPrimaryIPv4(tunnel, stop: stop)
@@ -540,11 +540,11 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
             let result = try capture(routePath, ["-n", "add"] + rule.arguments)
             guard result.status == 0 else {
                 if try rule.isInstalled() { continue }
-                throw Failure("Не удалось заблокировать обычный маршрут IPv6: \(result.text.trimmingCharacters(in: .whitespacesAndNewlines))")
+                throw Failure(L("Не удалось заблокировать обычный маршрут IPv6: \(result.text.trimmingCharacters(in: .whitespacesAndNewlines))"))
             }
             ipv6Guards.append(rule)
         }
-        emit("log", "Полный режим IPv4. Обычные маршруты IPv6 временно заблокированы.")
+        emit("log", L("Полный режим IPv4. Обычные маршруты IPv6 временно заблокированы."))
     }
     for route in routes {
         try stop.check()
@@ -552,7 +552,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
     }
     if let transportRoute {
         try verifyTransportRoute(transportRoute)
-        trace.event("L3 IPv4", "Основной интерфейс IPv4 macOS · \(tunnel).")
+        trace.event("L3 IPv4", L("Основной интерфейс IPv4 macOS · \(tunnel)."))
     }
     if let peerSuffix, let dns {
         for _ in 0..<10 {
@@ -562,10 +562,10 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         }
         do {
             let servers = dns.servers
-            guard !servers.isEmpty else { throw Failure("VPN-сервер не передал адреса DNS.") }
+            guard !servers.isEmpty else { throw Failure(L("VPN-сервер не передал адреса DNS.")) }
             dnsRules.append(try DNSRule(suffix: peerSuffix, servers: servers))
         } catch {
-            emit("log", "Не удалось применить DNS-суффикс \(peerSuffix). \(error.localizedDescription)")
+            emit("log", L("Не удалось применить DNS-суффикс \(peerSuffix). \(error.localizedDescription)"))
         }
     }
     for rule in dnsRules {
@@ -573,7 +573,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         do {
             for server in rule.servers {
                 try stop.check()
-                if ips.contains(server) { throw Failure("Адрес DNS совпал с адресом VPN-сервера.") }
+                if ips.contains(server) { throw Failure(L("Адрес DNS совпал с адресом VPN-сервера.")) }
                 if try routeInfo(server)["interface"] != tunnel {
                     try add(InstalledRoute(route: VPNRoute(kind: "host", destination: server), interface: tunnel, gateway: nil),
                             to: &owned)
@@ -582,25 +582,25 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
             let key = "State:/Network/Service/\(UUID().uuidString)/DNS" as CFString
             let store = try installDNSRule(rule, search: rule.suffix == suffix, key: key)
             dnsStores.append((store, key))
-            trace.event("L7 DNS", "DNS-суффикс \(rule.suffix) · \(rule.servers.joined(separator: ", ")).")
+            trace.event("L7 DNS", L("DNS-суффикс \(rule.suffix) · \(rule.servers.joined(separator: ", "))."))
         } catch {
-            emit("log", "Не удалось применить DNS-суффикс \(rule.suffix). \(error.localizedDescription)")
+            emit("log", L("Не удалось применить DNS-суффикс \(rule.suffix). \(error.localizedDescription)"))
         }
     }
     try stop.check()
-    guard process.isRunning else { throw Failure("VPN-соединение завершилось (код \(process.terminationStatus)).") }
-    trace.event("VPN", "Маршруты установлены.", next: .connected)
+    guard process.isRunning else { throw Failure(L("VPN-соединение завершилось (код \(process.terminationStatus)).")) }
+    trace.event("VPN", L("Маршруты установлены."), next: .connected)
     emit("connected", tunnel)
     if fullTunnel && profile.diagnoseInternet == true {
         do {
-            let path = try routeInfo("1.1.1.1")["interface"] ?? "не найден"
-            trace.event("L3 IPv4", "Системный маршрут до 1.1.1.1 · \(path), интерфейс SSTP · \(tunnel).")
+            let path = try routeInfo("1.1.1.1")["interface"] ?? L("не найден")
+            trace.event("L3 IPv4", L("Системный маршрут до 1.1.1.1 · \(path), интерфейс SSTP · \(tunnel)."))
             try InternetDiagnostics.run(interface: tunnel, directory: directory,
                                         stopped: { stop.requested || !process.isRunning }, trace: trace)
         } catch is CancellationError {
             try stop.check()
         } catch {
-            trace.event("Проверка", "Не удалось завершить тест интернет-трафика: \(error.localizedDescription)")
+            trace.event(L("Проверка"), L("Не удалось завершить тест интернет-трафика: \(error.localizedDescription)"))
         }
     }
     while process.isRunning {
@@ -608,7 +608,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         usleep(250_000)
     }
     try stop.check()
-    throw Failure("VPN-соединение завершилось (код \(process.terminationStatus)). Этап: \(trace.pendingLabel).")
+    throw Failure(L("VPN-соединение завершилось (код \(process.terminationStatus)). Этап: \(trace.pendingLabel)."))
 }
 
 @main
@@ -616,17 +616,18 @@ struct Helper {
     static func main() {
         signal(SIGPIPE, SIG_IGN)
         do {
-            guard geteuid() == 0 else { throw Failure("Для VPN требуется разрешение администратора macOS.") }
+            guard geteuid() == 0 else { throw Failure(L("Для VPN требуется разрешение администратора macOS.")) }
             // macOS pppd opens the private options file under its real UID.
             // Match sudo's root identity before launching sstpc and pppd.
             guard setgid(0) == 0, setuid(0) == 0,
                   getuid() == 0, geteuid() == 0, getgid() == 0, getegid() == 0 else {
-                throw Failure("Не удалось подготовить права администратора для pppd.")
+                throw Failure(L("Не удалось подготовить права администратора для pppd."))
             }
             guard let line = readLine(), line.utf8.count <= 400 * 1024 else {
-                throw Failure("Не удалось прочитать настройки VPN.")
+                throw Failure(L("Не удалось прочитать настройки VPN."))
             }
             let request = try JSONDecoder().decode(VPNRequest.self, from: Data(line.utf8))
+            if let language = request.language { L10n.use(language) }
             let stop = StopSignal()
             DispatchQueue.global(qos: .userInitiated).async {
                 _ = readLine()
@@ -641,7 +642,7 @@ struct Helper {
             }
             try withExtendedLifetime(signals) { try run(request, stop: stop) }
         } catch is CancellationError {
-            emit("log", "VPN отключён.")
+            emit("log", L("VPN отключён."))
         } catch {
             emit("error", error.localizedDescription)
         }

@@ -1,12 +1,24 @@
 # SSTP VPN for macOS
 
-A native macOS client for SSTP VPNs using PPP authentication. The Universal app runs on Apple Silicon and Intel with macOS 15 or later. It includes a modified build of the open-source `sstpc` client and uses the system `pppd`. The interface is in Russian.
+[Читать по-русски](README.ru.md)
+
+A native macOS client for SSTP VPNs using PPP authentication. The Universal app runs on Apple Silicon and Intel with macOS 15 or later. It includes a modified build of the open-source `sstpc` client and uses the system `pppd`. English and Russian are available through macOS per-app language settings.
+
+![The SSTP VPN connection window in English](docs/screenshots/connection-en.png)
+
+| Routes | PowerShell import |
+| --- | --- |
+| [![Routes and full-tunnel settings](docs/screenshots/routes-en.png)](docs/screenshots/routes-en.png) | [![Windows PowerShell import](docs/screenshots/import-en.png)](docs/screenshots/import-en.png) |
+
+These screenshots show the bilingual development build with a sample profile.
 
 ## Install and connect
 
 1. Download the Universal ZIP from Releases, extract it, and move `SSTP VPN.app` to Applications. The ZIP includes the license and dependency notices.
-2. Open the app, then enter your server and credentials or choose **Импорт PowerShell…** to import a Windows VPN profile.
-3. Click **Подключить** and approve the macOS administrator prompt for the network helper. The app manages and disconnects its tunnel directly.
+2. Open the app, then enter your server and credentials or choose **Import PowerShell…** to import a Windows VPN profile.
+3. Click **Connect** and approve the macOS administrator prompt for the network helper. The app manages and disconnects its tunnel directly.
+
+To choose an app language, open **System Settings → General → Language & Region → Applications**. Add **SSTP VPN**, select English or Russian, and reopen the app. [Apple Support](https://support.apple.com/guide/mac-help/mh26684/mac)
 
 Local builds use ad hoc signing by default. If macOS blocks a downloaded build, review the download and its checksum before following Apple’s instructions for opening an app from an unidentified developer. [Apple Support](https://support.apple.com/en-us/102445)
 
@@ -20,21 +32,21 @@ Add-VpnConnectionRoute -ConnectionName Office -DestinationPrefix "192.0.2.0/24"
 Add-VpnConnectionTriggerDnsConfiguration -ConnectionName Office -DnsSuffix "corp.example.com" -DnsIPAddress "192.0.2.53"
 ```
 
-Enter your username and password after import. The app can remember the password in the macOS Keychain. To update routes and DNS for an existing profile, import the same name and server again. To delete a profile, select it and choose **Удалить профиль…**.
+Enter your username and password after import. The app can remember the password in the macOS Keychain. To update routes and DNS for an existing profile, import the same name and server again. To delete a profile, select it and choose **Delete profile…**.
 
 Supported authentication choices are MS‑CHAPv2, CHAP (MD5) and PAP. You can specify several with `-AuthenticationMethod` or choose them from the PPP menu. MS‑CHAPv2 is the default. CHAP and PAP require `-EncryptionLevel Optional` or `NoEncryption` when used without MS‑CHAPv2. The SSTP transport uses TLS for each method. EAP profiles, PowerShell expressions and settings specific to other VPN protocols result in an import error with the line number.
 
 ## Routes and DNS
 
-- **Split tunnel** sends the routes in the **Маршруты** tab through the VPN. Add individual IPv4 hosts or CIDR networks. For a Windows import, `-SplitTunneling` selects this mode.
+- **Split tunnel** sends the routes in the **Routes** tab through the VPN. Add individual IPv4 hosts or CIDR networks. For a Windows import, `-SplitTunneling` selects this mode.
 - **Full tunnel** sends internet-bound IPv4 traffic through the VPN and temporarily blocks ordinary IPv6 internet routes. More specific routes still take precedence. Full tunnel requires an available system default route and VPN server internet forwarding to change your public IPv4. A tunnel route scoped to its own interface does not prevent connecting.
 - `-DnsSuffix` sets a search domain and uses VPN-provided DNS for that domain. Explicit DNS rules from `Add-VpnConnectionTriggerDnsConfiguration` apply after connecting. The app removes its DNS settings on disconnect. Imported Windows route metrics have no effect on macOS.
 
 ## Server trust and diagnostics
 
-The default **Системное доверие macOS** mode validates the server name and TLS certificate chain using macOS trust settings. For a private certificate authority, select **Пользовательский комплект CA** in **Сертификаты** and import its root and any required intermediates in PEM or DER format. This local bundle can be updated or replaced and is shared by profiles that select it.
+The default **macOS system trust** mode validates the server name and TLS certificate chain using macOS trust settings. For a private certificate authority, select **Custom CA bundle** in **Certificates** and import its root and any required intermediates in PEM or DER format. This local bundle can be updated or replaced and is shared by profiles that select it.
 
-**Журнал** shows connection progress through DNS, IPv4 routing, TCP, TLS, SSTP, PPP authentication, and IPCP. Full tunnel has an optional internet check that makes HTTPS requests to Cloudflare. The app closes its tunnel when you quit. `-IdleDisconnectSeconds` sets the PPP idle timeout for an imported connection.
+**Log** shows connection progress through DNS, IPv4 routing, TCP, TLS, SSTP, PPP authentication, and IPCP. Full tunnel has an optional internet check that makes HTTPS requests to Cloudflare. The app closes its tunnel when you quit. `-IdleDisconnectSeconds` sets the PPP idle timeout for an imported connection.
 
 ## Build from source
 

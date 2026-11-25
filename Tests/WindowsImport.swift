@@ -3,6 +3,28 @@ import Foundation
 @main
 struct WindowsImportTests {
     static func main() throws {
+        if CommandLine.arguments.contains("--check-helper") {
+            L10n.use(.en)
+            precondition(L("Для VPN требуется разрешение администратора macOS.") ==
+                         "macOS administrator authorization is required for the VPN.")
+            print("The helper can load the app's English resources")
+            return
+        }
+        if CommandLine.arguments.contains("--check-english") {
+            precondition(L10n.language == .en)
+            precondition(L("Нет профилей") == "No profiles")
+            let suffix = "{2}"
+            precondition(L("DNS-правило для \(suffix) уже задано.") == "A DNS rule for {2} already exists.")
+            do {
+                _ = try WindowsConfig.parse("Add-VpnConnection 'Office' -TunnelType SSTP")
+                preconditionFailure("Accepted a profile without a server")
+            } catch {
+                precondition(error.localizedDescription.hasPrefix("Line 1:"), error.localizedDescription)
+            }
+            print("English language preference, interpolated strings, and import errors passed")
+            return
+        }
+        precondition(L10n.language == .ru && L("Нет профилей") == "Нет профилей")
         let input = #"""
             <# DNS and routes for a multi-step setup #>
             $name = 'Office 1'

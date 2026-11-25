@@ -9,10 +9,10 @@ final class VPNModel: ObservableObject {
 
         var label: String {
             switch self {
-            case .disconnected: "Не подключено"
-            case .connecting: "Подключение…"
-            case .connected: "Подключено"
-            case .disconnecting: "Отключение…"
+            case .disconnected: L("Не подключено")
+            case .connecting: L("Подключение…")
+            case .connected: L("Подключено")
+            case .disconnecting: L("Отключение…")
             }
         }
     }
@@ -59,7 +59,7 @@ final class VPNModel: ObservableObject {
                 try Storage.savePassword(password.isEmpty ? nil : password, for: selected.id)
             }
             try saveSettings()
-            notice = "Профиль сохранён."
+            notice = L("Профиль сохранён.")
         } catch { self.error = error.localizedDescription }
     }
 
@@ -77,7 +77,8 @@ final class VPNModel: ObservableObject {
 
     func createProfile() {
         guard !busy, library.profiles.isEmpty else { return }
-        let starter = SavedProfile(id: UUID().uuidString, name: "Основной профиль", settings: Profile())
+        let starter = SavedProfile(id: UUID().uuidString, name: SavedProfile.defaultName,
+                                   settings: Profile(), hasDefaultName: true)
         do {
             try activate(ProfileLibrary(profiles: [starter], selectedID: starter.id))
             notice = nil
@@ -93,22 +94,22 @@ final class VPNModel: ObservableObject {
             self.error = error.localizedDescription
             return
         }
-        notice = "Профиль удалён."
+        notice = L("Профиль удалён.")
         var cleanupErrors: [String] = []
         do { try Storage.savePassword(nil, for: id) }
-        catch { cleanupErrors.append("Не удалось удалить его пароль. \(error.localizedDescription)") }
+        catch { cleanupErrors.append(L("Не удалось удалить его пароль. \(error.localizedDescription)")) }
         if id == ProfileLibrary.legacyID {
             do { try Storage.removeLegacySnapshot() }
-            catch { cleanupErrors.append("Не удалось удалить прежнюю копию настроек. \(error.localizedDescription)") }
+            catch { cleanupErrors.append(L("Не удалось удалить прежнюю копию настроек. \(error.localizedDescription)")) }
         }
         if !cleanupErrors.isEmpty {
-            self.error = "Профиль удалён. " + cleanupErrors.joined(separator: "\n")
+            self.error = L("Профиль удалён. ") + cleanupErrors.joined(separator: "\n")
         }
     }
 
     func openWindowsConfig() throws -> String? {
         let panel = NSOpenPanel()
-        panel.title = "Выберите скрипт настройки SSTP для Windows"
+        panel.title = L("Выберите скрипт настройки SSTP для Windows")
         panel.allowedContentTypes = [.plainText, UTType(filenameExtension: "ps1") ?? .data]
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         return try WindowsConfig.decode(Data(contentsOf: url))
@@ -122,7 +123,7 @@ final class VPNModel: ObservableObject {
         try updated.addWindows(imported)
         try activate(updated)
         let routes = try VPNRoute.parse(profile.routes).count
-        notice = "Импортировано профилей: \(imported.count). Маршрутов в выбранном профиле: \(routes)."
+        notice = L("Импортировано профилей: \(imported.count). Маршрутов в выбранном профиле: \(routes).")
     }
 
     private func activate(_ updated: ProfileLibrary) throws {
@@ -177,27 +178,27 @@ final class VPNModel: ObservableObject {
         guard !busy, let selected = library.selected else { return }
         do {
             refreshEngine()
-            guard engine != nil else { throw Failure("В приложении отсутствует сетевой компонент sstpc.") }
+            guard engine != nil else { throw Failure(L("В приложении отсутствует сетевой компонент sstpc.")) }
             var bundle = Data()
             if profile.trustMode == .custom {
                 try loadCustomCertificates()
                 guard customBundle else {
-                    throw Failure("Импортируйте комплект CA в разделе «Сертификаты» или выберите системное доверие macOS.")
+                    throw Failure(L("Импортируйте комплект CA в разделе «Сертификаты» или выберите системное доверие macOS."))
                 }
                 let usableCA = certificates.filter(\.current)
                 guard !usableCA.isEmpty else {
-                    throw Failure("Проверьте сроки действия сертификатов в разделе «Сертификаты».")
+                    throw Failure(L("Проверьте сроки действия сертификатов в разделе «Сертификаты»."))
                 }
                 bundle = Certificates.pem(usableCA)
             }
             let request = VPNRequest(profile: profile, password: password,
-                                     certificates: bundle)
+                                     certificates: bundle, language: L10n.language)
             _ = try request.validate()
             if profile.remember { try Storage.savePassword(password, for: selected.id) }
             try saveSettings()
             state = .connecting
             notice = nil
-            log("Запрошено подключение к \(profile.server):\(profile.port).")
+            log(L("Запрошено подключение к \(profile.server):\(profile.port)."))
             let session = PrivilegedSession()
             self.session = session
             session.start(request) { [weak self] event in
@@ -221,16 +222,16 @@ final class VPNModel: ObservableObject {
 
     func importCertificates(append: Bool) {
         let panel = NSOpenPanel()
-        panel.title = "Выберите новую цепочку или отдельные сертификаты CA"
+        panel.title = L("Выберите новую цепочку или отдельные сертификаты CA")
         panel.allowsMultipleSelection = true
         guard panel.runModal() == .OK else { return }
         do {
             let imported = try panel.urls.flatMap { try Certificates.parse(Data(contentsOf: $0)) }
             guard imported.allSatisfy(\.current) else {
-                throw Failure("В выбранном комплекте есть сертификаты вне срока действия.")
+                throw Failure(L("В выбранном комплекте есть сертификаты вне срока действия."))
             }
             try saveCertificates((append ? certificates : []) + imported)
-            notice = "Общий комплект CA обновлён."
+            notice = L("Общий комплект CA обновлён.")
         } catch { self.error = error.localizedDescription }
     }
 
@@ -238,7 +239,7 @@ final class VPNModel: ObservableObject {
         guard certificates.count > 1 else { return }
         do {
             try saveCertificates(certificates.filter { $0.id != item.id })
-            notice = "Сертификат удалён из общего комплекта."
+            notice = L("Сертификат удалён из общего комплекта.")
         } catch { self.error = error.localizedDescription }
     }
 
@@ -283,7 +284,7 @@ final class VPNModel: ObservableObject {
         switch event.type {
         case "connected":
             if state != .disconnecting { state = .connected(event.message) }
-            log("VPN подключён · \(event.message).")
+            log(L("VPN подключён · \(event.message)."))
         case "log":
             log(event.message)
         case "error":

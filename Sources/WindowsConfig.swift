@@ -7,17 +7,17 @@ struct WindowsProfile {
 
 enum WindowsConfig {
     static func decode(_ data: Data) throws -> String {
-        guard data.count <= 256 * 1024 else { throw Failure("Размер скрипта Windows должен быть до 256 КБ.") }
+        guard data.count <= 256 * 1024 else { throw Failure(L("Размер скрипта Windows должен быть до 256 КБ.")) }
         let bom = data.prefix(2)
         let encoding: String.Encoding = bom == Data([0xff, 0xfe]) || bom == Data([0xfe, 0xff]) ? .utf16 : .utf8
         guard let text = String(data: data, encoding: encoding) else {
-            throw Failure("Откройте файл PowerShell в UTF-8 или UTF-16 с BOM.")
+            throw Failure(L("Откройте файл PowerShell в UTF-8 или UTF-16 с BOM."))
         }
         return text
     }
 
     static func parse(_ text: String) throws -> [WindowsProfile] {
-        guard text.utf8.count <= 256 * 1024 else { throw Failure("Размер скрипта Windows должен быть до 256 КБ.") }
+        guard text.utf8.count <= 256 * 1024 else { throw Failure(L("Размер скрипта Windows должен быть до 256 КБ.")) }
         var parser = PowerShellProfileScript(tokens: try PowerShellProfileScript.lex(text))
         let commands = try parser.readCommands()
         var profiles: [WindowsProfile] = []
@@ -31,12 +31,12 @@ enum WindowsConfig {
             }
             let name = try cmd.required("name")
             guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, name.utf8.count <= 160 else {
-                throw cmd.issue("Укажите имя профиля в -Name.")
+                throw cmd.issue(L("Укажите имя профиля в -Name."))
             }
-            guard byName[name.lowercased()] == nil else { throw cmd.issue("Имя профиля «\(name)» повторяется.") }
-            guard profiles.count < 32 else { throw cmd.issue("В одном файле можно импортировать до 32 профилей.") }
+            guard byName[name.lowercased()] == nil else { throw cmd.issue(L("Имя профиля «\(name)» повторяется.")) }
+            guard profiles.count < 32 else { throw cmd.issue(L("В одном файле можно импортировать до 32 профилей.")) }
             guard cmd.scalar("tunneltype")?.lowercased() == "sstp" else {
-                throw cmd.issue("Требуется явный -TunnelType SSTP.")
+                throw cmd.issue(L("Требуется явный -TunnelType SSTP."))
             }
             var settings = Profile()
             settings.fullTunnel = true
@@ -47,10 +47,10 @@ enum WindowsConfig {
             profiles.append(WindowsProfile(name: name, settings: settings))
             connectionLines.append(cmd.line)
         }
-        guard !profiles.isEmpty else { throw Failure("Добавьте команду Add-VpnConnection для профиля SSTP.") }
+        guard !profiles.isEmpty else { throw Failure(L("Добавьте команду Add-VpnConnection для профиля SSTP.")) }
         for cmd in changes {
             let name = try cmd.required(cmd.name == "set-vpnconnection" ? "name" : "connectionname")
-            guard let index = byName[name.lowercased()] else { throw cmd.issue("В тексте отсутствует профиль «\(name)».") }
+            guard let index = byName[name.lowercased()] else { throw cmd.issue(L("В тексте отсутствует профиль «\(name)».")) }
             switch cmd.name {
             case "set-vpnconnection":
                 try applyConnection(cmd, to: &profiles[index].settings)
@@ -59,13 +59,13 @@ enum WindowsConfig {
                 do {
                     let prefix = try cmd.required("destinationprefix")
                     guard let route = try VPNRoute.parse("net " + prefix).first else {
-                        throw Failure("Укажите IPv4-подсеть в -DestinationPrefix.")
+                        throw Failure(L("Укажите IPv4-подсеть в -DestinationPrefix."))
                     }
                     var routes = try VPNRoute.parse(profiles[index].settings.routes)
                     if cmd.name.hasPrefix("remove-") {
                         routes.removeAll { $0 == route }
                     } else if !routes.contains(route) {
-                        guard routes.count < 128 else { throw Failure("Можно добавить до 128 маршрутов.") }
+                        guard routes.count < 128 else { throw Failure(L("Можно добавить до 128 маршрутов.")) }
                         routes.append(route)
                     }
                     profiles[index].settings.routes = routes.map(\.description).joined(separator: "\n")
@@ -83,15 +83,15 @@ enum WindowsConfig {
 
     private static func applyConnection(_ cmd: PowerShellProfileScript.Command, to profile: inout Profile) throws {
         if let tunnel = cmd.scalar("tunneltype"), tunnel.lowercased() != "sstp" {
-            throw cmd.issue("Поддерживается -TunnelType SSTP.")
+            throw cmd.issue(L("Поддерживается -TunnelType SSTP."))
         }
         if cmd.args["eapconfigxmlstream"] != nil {
-            throw cmd.issue("-EapConfigXmlStream требует поддержку EAP в сетевом компоненте.")
+            throw cmd.issue(L("-EapConfigXmlStream требует поддержку EAP в сетевом компоненте."))
         }
         if let methods = cmd.args["authenticationmethod"] {
             let authentication = try methods.map { method in
                 guard let supported = PPPAuthentication(rawValue: method.lowercased()) else {
-                    throw cmd.issue("Метод \(method) пока недоступен. Поддерживаются MSCHAPv2, CHAP и PAP.")
+                    throw cmd.issue(L("Метод \(method) пока недоступен. Поддерживаются MSCHAPv2, CHAP и PAP."))
                 }
                 return supported
             }
@@ -99,14 +99,14 @@ enum WindowsConfig {
         }
         if let level = cmd.scalar("encryptionlevel")?.lowercased() {
             guard let encryption = level == "noencryption" ? PPPEncryption.none : PPPEncryption(rawValue: level) else {
-                throw cmd.issue("Поддерживаются уровни EncryptionLevel NoEncryption, Optional, Required и Maximum.")
+                throw cmd.issue(L("Поддерживаются уровни EncryptionLevel NoEncryption, Optional, Required и Maximum."))
             }
             profile.pppEncryption = encryption
         }
         do {
             if let address = cmd.scalar("serveraddress") {
                 let endpoint = address.split(separator: ":", omittingEmptySubsequences: false)
-                guard (1...2).contains(endpoint.count) else { throw Failure("Укажите имя сервера или IPv4.") }
+                guard (1...2).contains(endpoint.count) else { throw Failure(L("Укажите имя сервера или IPv4.")) }
                 profile.server = String(endpoint[0])
                 profile.port = endpoint.count == 2 ? String(endpoint[1]) : "443"
                 try profile.validateEndpoint()
@@ -119,7 +119,7 @@ enum WindowsConfig {
         if let remember = cmd.scalar("remembercredential") { profile.remember = remember == "true" }
         if let timeout = cmd.scalar("idledisconnectseconds") {
             guard let seconds = UInt32(timeout), seconds <= Int32.max else {
-                throw cmd.issue("Укажите -IdleDisconnectSeconds от 0 до \(Int32.max).")
+                throw cmd.issue(L("Укажите -IdleDisconnectSeconds от 0 до \(Int32.max)."))
             }
             profile.idleDisconnectSeconds = seconds
         }
@@ -133,7 +133,7 @@ enum WindowsConfig {
                 rules.removeAll { $0.suffix == suffix }
             } else {
                 guard let addresses = cmd.args["dnsipaddress"] else {
-                    throw Failure("Укажите -DnsIPAddress. Для одного суффикса поиска используйте -DnsSuffix в Add-VpnConnection.")
+                    throw Failure(L("Укажите -DnsIPAddress. Для одного суффикса поиска используйте -DnsSuffix в Add-VpnConnection."))
                 }
                 let servers = addresses.flatMap { $0.components(separatedBy: ",") }
                     .map { $0.trimmingCharacters(in: .whitespaces) }
@@ -158,7 +158,7 @@ private struct PowerShellProfileScript {
         func scalar(_ key: String) -> String? { args[key]?.first }
 
         func required(_ key: String) throws -> String {
-            guard let value = scalar(key), !value.isEmpty else { throw issue("Укажите -\(key).") }
+            guard let value = scalar(key), !value.isEmpty else { throw issue(L("Укажите -\(key).")) }
             return value
         }
 
@@ -204,7 +204,7 @@ private struct PowerShellProfileScript {
         skipSeparators()
         while let token = current {
             guard case .word(let name) = token.kind else {
-                throw Self.issue(token.line, "Ожидается команда VpnClient или объявление переменной.")
+                throw Self.issue(token.line, L("Ожидается команда VpnClient или объявление переменной."))
             }
             position += 1
             if Self.identifier(name, prefix: "$") != nil, take(.equals) {
@@ -214,7 +214,7 @@ private struct PowerShellProfileScript {
                 if cmd.scalar("whatif") != "true" { commands.append(cmd) }
             }
             guard current == nil || current?.kind == .newline || current?.kind == .separator else {
-                throw Self.issue(line, "Ожидается конец команды.")
+                throw Self.issue(line, L("Ожидается конец команды."))
             }
             skipSeparators()
         }
@@ -224,7 +224,7 @@ private struct PowerShellProfileScript {
     private mutating func readAssignment(_ name: String, line: Int) throws {
         let key = String(name.dropFirst()).lowercased()
         guard key != "true" && key != "false" && key != "null" else {
-            throw Self.issue(line, "Эту переменную PowerShell нельзя переопределить.")
+            throw Self.issue(line, L("Эту переменную PowerShell нельзя переопределить."))
         }
         if take(.startMap) {
             var map: [String: [String]] = [:]
@@ -233,14 +233,14 @@ private struct PowerShellProfileScript {
                 let fieldLine = self.line
                 let field = try value()
                 guard field.count == 1, take(.equals) else {
-                    throw Self.issue(fieldLine, "В таблице параметров ожидается Имя = значение.")
+                    throw Self.issue(fieldLine, L("В таблице параметров ожидается Имя = значение."))
                 }
                 let parameter = field[0].lowercased()
-                guard map[parameter] == nil else { throw Self.issue(fieldLine, "Параметр -\(parameter) повторяется.") }
+                guard map[parameter] == nil else { throw Self.issue(fieldLine, L("Параметр -\(parameter) повторяется.")) }
                 map[parameter] = try values()
                 if current?.kind != .endMap {
                     guard current?.kind == .newline || current?.kind == .separator else {
-                        throw Self.issue(self.line, "Закройте таблицу } или добавьте следующую строку параметров.")
+                        throw Self.issue(self.line, L("Закройте таблицу } или добавьте следующую строку параметров."))
                     }
                     skipSeparators()
                 }
@@ -255,7 +255,7 @@ private struct PowerShellProfileScript {
         let short = raw.lowercased()
         let name = short.hasPrefix("vpnclient\\") ? String(short.dropFirst(10)) : short
         guard let spec = Self.commands[name] else {
-            throw Self.issue(line, "Команда «\(raw)» не поддерживается при импорте профиля SSTP.")
+            throw Self.issue(line, L("Команда «\(raw)» не поддерживается при импорте профиля SSTP."))
         }
         var args: [String: [String]] = [:]
         var positional: [[String]] = []
@@ -264,14 +264,14 @@ private struct PowerShellProfileScript {
                 while take(.newline) {}
                 guard let next = current, case .word(let sink) = next.kind,
                       sink.caseInsensitiveCompare("Out-Null") == .orderedSame else {
-                    throw Self.issue(token.line, "Поддерживается вывод команды через | Out-Null.")
+                    throw Self.issue(token.line, L("Поддерживается вывод команды через | Out-Null."))
                 }
                 position += 1
                 break
             }
             if case .word(let word) = token.kind, let variable = Self.identifier(word, prefix: "@") {
                 guard case .map(let map) = constants[variable] else {
-                    throw Self.issue(token.line, "Объявите таблицу \(word) перед командой.")
+                    throw Self.issue(token.line, L("Объявите таблицу \(word) перед командой."))
                 }
                 position += 1
                 for key in map.keys.sorted() {
@@ -289,7 +289,7 @@ private struct PowerShellProfileScript {
                     }
                     argument = values
                 } else if parameter.attached != nil || !spec.switches.contains(key) {
-                    guard !isParameterOrEnd else { throw Self.issue(token.line, "Укажите значение для -\(key).") }
+                    guard !isParameterOrEnd else { throw Self.issue(token.line, L("Укажите значение для -\(key).")) }
                     argument = try values()
                 } else {
                     argument = nil
@@ -300,7 +300,7 @@ private struct PowerShellProfileScript {
             }
         }
         let slots = spec.positions.filter { args[$0] == nil }
-        guard positional.count <= slots.count else { throw Self.issue(line, "Слишком много позиционных аргументов.") }
+        guard positional.count <= slots.count else { throw Self.issue(line, L("Слишком много позиционных аргументов.")) }
         for (key, argument) in zip(slots, positional) {
             try Self.insert(key, values: argument, into: &args, spec: spec, line: line)
         }
@@ -310,23 +310,23 @@ private struct PowerShellProfileScript {
     private static func insert(_ raw: String, values: [String]?, into args: inout [String: [String]],
                                spec: Spec, line: Int) throws {
         let key = spec.key(raw)
-        guard args[key] == nil else { throw issue(line, "Параметр -\(key) повторяется.") }
+        guard args[key] == nil else { throw issue(line, L("Параметр -\(key) повторяется.")) }
         if spec.switches.contains(key) {
             let flags = values ?? ["true"]
             guard flags.count == 1, let flag = flags.first?.lowercased(), ["true", "false"].contains(flag) else {
-                throw issue(line, "Для -\(key) допустимы \u{24}true и \u{24}false.")
+                throw issue(line, L("Для -\(key) допустимы \u{24}true и \u{24}false."))
             }
             args[key] = [flag]
         } else if spec.values.contains(key) || spec.lists.contains(key) {
             guard let values, !values.isEmpty, spec.lists.contains(key) || values.count == 1 else {
-                throw issue(line, "Укажите значение для -\(key).")
+                throw issue(line, L("Укажите значение для -\(key)."))
             }
             if key == "routemetric", UInt32(values[0]) == nil {
-                throw issue(line, "Укажите неотрицательное целое число для -RouteMetric.")
+                throw issue(line, L("Укажите неотрицательное целое число для -RouteMetric."))
             }
             args[key] = values
         } else {
-            throw issue(line, "Параметр -\(key) не поддерживается при импорте.")
+            throw issue(line, L("Параметр -\(key) не поддерживается при импорте."))
         }
     }
 
@@ -355,7 +355,7 @@ private struct PowerShellProfileScript {
                     skipSeparators()
                     continue
                 }
-                guard current?.kind == .endArray else { throw Self.issue(line, "Закройте массив скобкой ).") }
+                guard current?.kind == .endArray else { throw Self.issue(line, L("Закройте массив скобкой ).")) }
             }
             return result
         }
@@ -364,33 +364,33 @@ private struct PowerShellProfileScript {
 
     private func append(_ values: [String], to result: inout [String]) throws {
         guard values.count <= 128 - result.count else {
-            throw Self.issue(line, "Один список PowerShell может содержать до 128 элементов.")
+            throw Self.issue(line, L("Один список PowerShell может содержать до 128 элементов."))
         }
         result += values
     }
 
     private mutating func atom() throws -> [String] {
-        guard let token = current else { throw Self.issue(line, "Ожидается значение PowerShell.") }
+        guard let token = current else { throw Self.issue(line, L("Ожидается значение PowerShell.")) }
         position += 1
         switch token.kind {
         case .word(let text):
-            guard Self.parameter(text) == nil else { throw Self.issue(token.line, "Ожидается значение перед \(text).") }
+            guard Self.parameter(text) == nil else { throw Self.issue(token.line, L("Ожидается значение перед \(text).")) }
             return try resolve(text, line: token.line)
         case .quoted(let text, let expand):
             if expand, text.contains("$") { return try resolve(text, line: token.line) }
             return [text]
-        default: throw Self.issue(token.line, "Ожидается литерал или объявленная переменная PowerShell.")
+        default: throw Self.issue(token.line, L("Ожидается литерал или объявленная переменная PowerShell."))
         }
     }
 
     private func resolve(_ text: String, line: Int) throws -> [String] {
         guard text.contains("$") else { return [text] }
         guard let name = Self.identifier(text, prefix: "$") else {
-            throw Self.issue(line, "Подставьте готовое значение вместо выражения PowerShell.")
+            throw Self.issue(line, L("Подставьте готовое значение вместо выражения PowerShell."))
         }
         if name == "true" || name == "false" { return [name] }
         guard case .values(let values) = constants[name] else {
-            throw Self.issue(line, "Объявите переменную \(text) с готовым значением перед командой.")
+            throw Self.issue(line, L("Объявите переменную \(text) с готовым значением перед командой."))
         }
         return values
     }
@@ -508,14 +508,14 @@ private struct PowerShellProfileScript {
                         }
                     } else if quote == "\"", char == "`" {
                         guard let escape = consume(), ["`", "\"", "'", " "].contains(escape) else {
-                            throw issue(line, "Неподдерживаемая escape-последовательность PowerShell.")
+                            throw issue(line, L("Неподдерживаемая escape-последовательность PowerShell."))
                         }
                         text.append(escape)
                     } else {
                         text.append(char)
                     }
                 }
-                guard closed else { throw issue(line, "Незакрытые кавычки.") }
+                guard closed else { throw issue(line, L("Незакрытые кавычки.")) }
                 append(.quoted(text, expand: quote == "\""))
             } else if ch == "<", next == "#" {
                 flush()
@@ -530,7 +530,7 @@ private struct PowerShellProfileScript {
                     }
                     if char == "\n" { line += 1 }
                 }
-                guard closed else { throw issue(beginning, "Незакрытый комментарий <# … #>.") }
+                guard closed else { throw issue(beginning, L("Незакрытый комментарий <# … #>.")) }
             } else if ch == "#", word.isEmpty {
                 while let char = next, char != "\n" { _ = consume() }
             } else if ch == "@", next == "(" || next == "{" {
@@ -546,12 +546,12 @@ private struct PowerShellProfileScript {
                 if word.isEmpty { start = line }
                 if ch == "`" {
                     guard let escape = consume(), ["`", "\"", "'", " "].contains(escape) else {
-                        throw issue(line, "Неподдерживаемая escape-последовательность PowerShell.")
+                        throw issue(line, L("Неподдерживаемая escape-последовательность PowerShell."))
                     }
                     word.append(escape)
                 } else {
                     guard !"&(){}<>".contains(ch) else {
-                        throw issue(line, "Вставьте команды с готовыми значениями вместо выражений PowerShell.")
+                        throw issue(line, L("Вставьте команды с готовыми значениями вместо выражений PowerShell."))
                     }
                     word.append(ch)
                 }
@@ -562,6 +562,6 @@ private struct PowerShellProfileScript {
     }
 
     static func issue(_ line: Int, _ message: String) -> Failure {
-        Failure("Строка \(line): \(message)")
+        Failure(L("Строка \(line): \(message)"))
     }
 }

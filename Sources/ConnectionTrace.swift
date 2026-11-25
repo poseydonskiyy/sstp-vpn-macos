@@ -6,18 +6,18 @@ final class ConnectionTrace {
 
         var label: String {
             switch self {
-            case .preparation: "подготовка"
-            case .dns: "L7 DNS сервера"
-            case .route: "L3 маршрут до сервера"
-            case .tcp: "L4 TCP до сервера"
+            case .preparation: L("подготовка")
+            case .dns: L("L7 DNS сервера")
+            case .route: L("L3 маршрут до сервера")
+            case .tcp: L("L4 TCP до сервера")
             case .tls: "TLS"
-            case .http: "L7 HTTP для SSTP"
-            case .sstp: "L7 согласование SSTP"
-            case .ppp: "L2 согласование PPP"
-            case .authentication: "L2 ожидание результата аутентификации PPP"
-            case .ipcp: "L3 выдача IPv4 через IPCP"
-            case .routing: "L3 установка маршрутов и DNS"
-            case .connected: "передача трафика через VPN"
+            case .http: L("L7 HTTP для SSTP")
+            case .sstp: L("L7 согласование SSTP")
+            case .ppp: L("L2 согласование PPP")
+            case .authentication: L("L2 ожидание результата аутентификации PPP")
+            case .ipcp: L("L3 выдача IPv4 через IPCP")
+            case .routing: L("L3 установка маршрутов и DNS")
+            case .connected: L("передача трафика через VPN")
             }
         }
     }
@@ -41,7 +41,7 @@ final class ConnectionTrace {
     func exitMessage(_ status: Int32) -> String {
         lock.lock()
         defer { lock.unlock() }
-        return failure ?? "sstpc завершился (код \(status)). Этап: \(pending.label)."
+        return failure ?? L("sstpc завершился (код \(status)). Этап: \(pending.label).")
     }
 
     func event(_ layer: String, _ message: String, next: Stage? = nil) {
@@ -49,7 +49,7 @@ final class ConnectionTrace {
         defer { lock.unlock() }
         if let next, next.rawValue >= pending.rawValue { pending = next }
         let milliseconds = (DispatchTime.now().uptimeNanoseconds - start) / 1_000_000
-        write("[+\(milliseconds) мс · \(layer)] \(message)")
+        write(L("[+\(milliseconds) мс · \(layer)] \(message)"))
     }
 
     func engine(_ message: String) {
@@ -63,7 +63,7 @@ final class ConnectionTrace {
         } else if message.contains("unexpected eof while reading") {
             lock.lock()
             if pending == .authentication, failure == nil {
-                failure = "Сервер закрыл соединение до результата аутентификации PPP. Причина отказа не получена."
+                failure = L("Сервер закрыл соединение до результата аутентификации PPP. Причина отказа не получена.")
             }
             lock.unlock()
             event("TLS", message)
@@ -79,18 +79,18 @@ final class ConnectionTrace {
                     || message.contains("Connection Established") {
             event("L7 SSTP", message)
         } else if message.contains("Started PPP Link Negotiation") {
-            event("L7 SSTP", "Connect-ACK получен. Начинается PPP.", next: .ppp)
+            event("L7 SSTP", L("Connect-ACK получен. Начинается PPP."), next: .ppp)
         } else if message.contains("CHAP Success") || message.contains("PAP Ack") {
-            event("L2 Аутентификация PPP", message, next: .ipcp)
+            event(L("L2 Аутентификация PPP"), message, next: .ipcp)
         } else if message.contains("CHAP Response") || message.contains("PAP Request") {
-            event("L2 Аутентификация PPP", message, next: .authentication)
+            event(L("L2 Аутентификация PPP"), message, next: .authentication)
         } else if message.contains("CHAP Failure") || message.contains("PAP Nak") {
             lock.lock()
-            failure = "Сервер отклонил аутентификацию PPP. Проверьте способ входа, логин и пароль."
+            failure = L("Сервер отклонил аутентификацию PPP. Проверьте способ входа, логин и пароль.")
             lock.unlock()
-            event("L2 Аутентификация PPP", message)
+            event(L("L2 Аутентификация PPP"), message)
         } else if message.contains("CHAP") || message.contains("PAP") {
-            event("L2 Аутентификация PPP", message)
+            event(L("L2 Аутентификация PPP"), message)
         } else if message.contains("IPCP") || message.contains(" IP address ") {
             event("L3 IPCP", message)
         } else if message.contains(" DNS address ") {

@@ -2,11 +2,22 @@ import Foundation
 import Security
 
 struct SavedProfile: Codable, Identifiable {
+    static let defaultName = "Основной профиль"
     let id: String
     let name: String
     var settings: Profile
+    var hasDefaultName: Bool? = nil
 
-    var title: String { id == ProfileLibrary.legacyID ? name : "\(name) · \(settings.server)" }
+    var displayName: String {
+        if hasDefaultName == true || (id == ProfileLibrary.legacyID && name == Self.defaultName) {
+            return L("Основной профиль")
+        }
+        return name
+    }
+
+    var title: String {
+        settings.server.isEmpty || id == ProfileLibrary.legacyID ? displayName : "\(displayName) · \(settings.server)"
+    }
 }
 
 struct ProfileLibrary: Codable {
@@ -49,7 +60,7 @@ struct ProfileLibrary: Codable {
                 profiles[index].settings.dnsRules = item.settings.dnsRules
                 selectedID = profiles[index].id
             } else {
-                guard profiles.count < 128 else { throw Failure("В приложении можно хранить до 128 профилей.") }
+                guard profiles.count < 128 else { throw Failure(L("В приложении можно хранить до 128 профилей.")) }
                 let profile = SavedProfile(id: UUID().uuidString, name: item.name, settings: item.settings)
                 profiles.append(profile)
                 selectedID = profile.id
@@ -82,7 +93,8 @@ enum Storage {
             return library
         }
         let profile = (try? Data(contentsOf: profileURL)).flatMap { try? JSONDecoder().decode(Profile.self, from: $0) }
-        let initial = SavedProfile(id: ProfileLibrary.legacyID, name: "Основной профиль", settings: profile ?? Profile())
+        let initial = SavedProfile(id: ProfileLibrary.legacyID, name: SavedProfile.defaultName,
+                                   settings: profile ?? Profile(), hasDefaultName: true)
         return ProfileLibrary(profiles: [initial], selectedID: initial.id)
     }
 
@@ -121,7 +133,7 @@ enum Storage {
         }
         guard status == errSecSuccess else {
             let message = SecCopyErrorMessageString(status, nil).map { $0 as String } ?? String(status)
-            throw Failure("Связка ключей: \(message)")
+            throw Failure(L("Связка ключей: \(message)"))
         }
     }
 }

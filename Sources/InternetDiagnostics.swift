@@ -7,7 +7,7 @@ enum InternetDiagnostics {
     private static let marker = "__SSTP_CHECK__"
 
     static func run(interface: String, directory: String, stopped: () -> Bool, trace: ConnectionTrace) throws {
-        trace.event("Проверка", "Тестовый HTTPS к \(name). DNS и трафик проверяются отдельно.")
+        trace.event(L("Проверка"), L("Тестовый HTTPS к \(name). DNS и трафик проверяются отдельно."))
 
         let lookup = try run("/usr/bin/dscacheutil", ["-q", "host", "-a", "name", name],
                              limit: 3, stopped: stopped)
@@ -17,8 +17,8 @@ enum InternetDiagnostics {
             return VPNRoute.ipv4(value) == nil ? nil : value
         }
         trace.event("L7 DNS", addresses.isEmpty
-                    ? "Системный резолвер не вернул IPv4 для \(name) (код \(lookup.status))."
-                    : "Системный резолвер: \(name) → \(addresses.joined(separator: ", ")).")
+                    ? L("Системный резолвер не вернул IPv4 для \(name) (код \(lookup.status)).")
+                    : L("Системный резолвер: \(name) → \(addresses.joined(separator: ", "))."))
 
         let port = Int.random(in: 49152...63000)
         let path = URL(fileURLWithPath: directory, isDirectory: true).appendingPathComponent("tcp-diagnostic.txt")
@@ -34,7 +34,7 @@ enum InternetDiagnostics {
             try capture.run()
             captureStarted = true
         } catch {
-            trace.event("L4 TCP", "Захват заголовков недоступен.")
+            trace.event("L4 TCP", L("Захват заголовков недоступен."))
         }
         defer { if captureStarted { finish(capture) } }
         var ready = false
@@ -59,12 +59,12 @@ enum InternetDiagnostics {
                 let packets = packetCounts(output)
                 trace.event("L4 TCP", "\(interface), \(address):443 · SYN \(packets.syn), SYN‑ACK \(packets.ack), RST \(packets.reset).")
             } else {
-                trace.event("L4 TCP", "Захват на \(interface) не запустился. Счётчики SYN и SYN‑ACK недоступны.")
+                trace.event("L4 TCP", L("Захват на \(interface) не запустился. Счётчики SYN и SYN‑ACK недоступны."))
             }
         }
-        report(direct, label: "\(interface) напрямую к \(address)", trace: trace)
+        report(direct, label: L("\(interface) напрямую к \(address)"), trace: trace)
         let system = try https([], stopped: stopped)
-        report(system, label: "системный маршрут к \(name)", trace: trace)
+        report(system, label: L("системный маршрут к \(name)"), trace: trace)
     }
 
     static func packetCounts(_ output: String) -> (syn: Int, ack: Int, reset: Int) {
@@ -91,30 +91,30 @@ enum InternetDiagnostics {
         let lines = probe.output.split(separator: "\n")
         guard let metrics = lines.last(where: { $0.hasPrefix(marker + " ") })?.split(separator: " "),
               metrics.count >= 5, let connect = Double(metrics[2]), let tls = Double(metrics[3]) else {
-            trace.event("Проверка", "\(label) · нет результата curl (код \(probe.status)).")
+            trace.event(L("Проверка"), L("\(label) · нет результата curl (код \(probe.status))."))
             return
         }
         if probe.status == 6 {
-            trace.event("L7 DNS", "\(label) · имя не разрешилось.")
+            trace.event("L7 DNS", L("\(label) · имя не разрешилось."))
             return
         }
         guard connect > 0 else {
-            trace.event("L4 TCP", "\(label) · TCP не установлено (curl \(probe.status)).")
+            trace.event("L4 TCP", L("\(label) · TCP не установлено (curl \(probe.status))."))
             return
         }
         let endpoints = metrics.count >= 7 ? " · \(metrics[5]) → \(metrics[6])" : ""
-        trace.event("L4 TCP", "\(label) · \(milliseconds(connect)) мс\(endpoints).")
+        trace.event("L4 TCP", L("\(label) · \(milliseconds(connect)) мс\(endpoints)."))
         guard tls >= connect && tls > 0 else {
-            trace.event("TLS", "\(label) · рукопожатие не завершилось (curl \(probe.status)).")
+            trace.event("TLS", L("\(label) · рукопожатие не завершилось (curl \(probe.status))."))
             return
         }
-        trace.event("TLS", "\(label) · \(milliseconds(tls - connect)) мс после TCP.")
+        trace.event("TLS", L("\(label) · \(milliseconds(tls - connect)) мс после TCP."))
         let status = metrics[4]
         let publicIP = lines.first(where: { line in
             line.hasPrefix("ip=") && VPNRoute.ipv4(String(line.dropFirst(3))) != nil
-        }).map { " · внешний IPv4 \($0.dropFirst(3))" } ?? ""
+        }).map { L(" · внешний IPv4 \($0.dropFirst(3))") } ?? ""
         if status == "000" {
-            trace.event("L7 HTTP", "\(label) · ответа нет (curl \(probe.status)).")
+            trace.event("L7 HTTP", L("\(label) · ответа нет (curl \(probe.status))."))
         } else {
             let result = probe.status == 0 ? "" : " · curl \(probe.status)"
             trace.event("L7 HTTP", "\(label) · HTTP \(status)\(publicIP)\(result).")

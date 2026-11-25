@@ -28,11 +28,17 @@ struct SSTPApp: App {
     }
 }
 
-private enum Page: String, CaseIterable, Identifiable {
-    case connection = "Подключение"
-    case routes = "Маршруты"
-    case certificates = "Сертификаты"
-    case journal = "Журнал"
+private enum Page: CaseIterable, Identifiable {
+    case connection, routes, certificates, journal
+
+    var title: String {
+        switch self {
+        case .connection: L("Подключение")
+        case .routes: L("Маршруты")
+        case .certificates: L("Сертификаты")
+        case .journal: L("Журнал")
+        }
+    }
 
     var id: Self { self }
     var icon: String {
@@ -59,10 +65,10 @@ struct VPNWindow: View {
             Divider()
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
-                    Text(page.rawValue).font(.system(size: 28, weight: .semibold))
+                    Text(page.title).font(.system(size: 28, weight: .semibold))
                     Spacer()
                     if page == .connection {
-                        Button("Импорт PowerShell…") { windowsImport = true }
+                        Button(L("Импорт PowerShell…")) { windowsImport = true }
                         .fixedSize()
                         .disabled(model.busy)
                     }
@@ -119,7 +125,7 @@ struct VPNWindow: View {
                     page = item
                     model.notice = nil
                 } label: {
-                    Label(item.rawValue, systemImage: item.icon)
+                    Label(item.title, systemImage: item.icon)
                         .font(.system(size: 13, weight: page == item ? .semibold : .regular))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
@@ -134,7 +140,7 @@ struct VPNWindow: View {
             Spacer()
             HStack(spacing: 6) {
                 Image(systemName: model.engine == nil ? "exclamationmark.circle" : "checkmark.circle")
-                Text(model.engine == nil ? "sstpc не найден" : "sstpc доступен")
+                Text(model.engine == nil ? L("sstpc не найден") : L("sstpc доступен"))
             }
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -149,9 +155,9 @@ struct VPNWindow: View {
         Group {
             if model.engine == nil {
                 Panel {
-                    Label("Сетевой компонент недоступен", systemImage: "exclamationmark.circle")
+                    Label(L("Сетевой компонент недоступен"), systemImage: "exclamationmark.circle")
                         .font(.headline)
-                    Text("Замените SSTP VPN.app копией из архива.")
+                    Text(L("Замените SSTP VPN.app копией из архива."))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -162,8 +168,8 @@ struct VPNWindow: View {
 
     private var noProfiles: some View {
         Panel {
-            Text("Нет профилей").font(.headline)
-            Button("Создать профиль") {
+            Text(L("Нет профилей")).font(.headline)
+            Button(L("Создать профиль")) {
                 model.createProfile()
                 page = .connection
             }
@@ -173,7 +179,7 @@ struct VPNWindow: View {
     private func profileEditor(for selected: SavedProfile) -> some View {
         Panel {
             VStack(alignment: .leading, spacing: 13) {
-                Picker("Профиль", selection: Binding(
+                Picker(L("Профиль"), selection: Binding(
                     get: { model.library.selected?.id ?? selected.id }, set: { model.selectProfile($0) }
                 )) {
                     ForEach(model.library.profiles) { profile in
@@ -181,25 +187,25 @@ struct VPNWindow: View {
                     }
                 }
                 HStack(alignment: .top, spacing: 12) {
-                    Entry("Сервер") {
+                    Entry(L("Сервер")) {
                         TextField("vpn.example.com", text: $model.profile.server)
-                            .accessibilityLabel("Сервер")
+                            .accessibilityLabel(L("Сервер"))
                     }
-                    Entry("Порт") {
+                    Entry(L("Порт")) {
                         TextField("443", text: $model.profile.port)
-                            .accessibilityLabel("Порт")
+                            .accessibilityLabel(L("Порт"))
                     }
                     .frame(width: 85)
                 }
                 if model.profile.fullTunnel != true {
-                    DisclosureGroup("Маршрут до VPN-сервера") {
-                        Toggle("Использовать системный маршрут", isOn: Binding(
+                    DisclosureGroup(L("Маршрут до VPN-сервера")) {
+                        Toggle(L("Использовать системный маршрут"), isOn: Binding(
                             get: { model.profile.useSystemRouteForServer == true },
                             set: { model.profile.useSystemRouteForServer = $0 }
                         ))
                         if model.profile.usesSystemRouteForServer {
-                            Entry("IPv4 для подключения (необязательно)") {
-                                TextField("По DNS", text: Binding(
+                            Entry(L("IPv4 для подключения (необязательно)")) {
+                                TextField(L("По DNS"), text: Binding(
                                     get: { model.profile.serverIPv4Override ?? "" },
                                     set: { model.profile.serverIPv4Override = $0 }
                                 ))
@@ -207,11 +213,11 @@ struct VPNWindow: View {
                         }
                     }
                 }
-                Entry("Логин VPN") {
+                Entry(L("Логин VPN")) {
                     TextField("user@example.com", text: $model.profile.login)
-                        .accessibilityLabel("Логин VPN")
+                        .accessibilityLabel(L("Логин VPN"))
                 }
-                Menu("Метод PPP · \(model.profile.authentication.map(\.title).joined(separator: ", "))") {
+                Menu {
                     ForEach(PPPAuthentication.allCases) { method in
                         Toggle(method.title, isOn: Binding(
                             get: { model.profile.authentication.contains(method) },
@@ -226,7 +232,7 @@ struct VPNWindow: View {
                         .disabled(model.profile.authentication == [method])
                     }
                     Divider()
-                    Picker("Шифрование внутри PPP", selection: Binding(
+                    Picker(L("Шифрование внутри PPP"), selection: Binding(
                         get: { model.profile.pppEncryption ?? .optional },
                         set: { model.profile.pppEncryption = $0 }
                     )) {
@@ -234,38 +240,42 @@ struct VPNWindow: View {
                             Text(level.title).tag(level)
                         }
                     }
+                } label: {
+                    Text(L("Метод PPP · \(model.profile.authentication.map(\.title).joined(separator: ", "))"))
                 }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
                 if let suffix = model.profile.dnsSuffix {
-                    LabeledContent("DNS-суффикс", value: suffix)
+                    LabeledContent(L("DNS-суффикс"), value: suffix)
                 }
                 ForEach(model.profile.dnsRules ?? [], id: \.suffix) { rule in
                     LabeledContent(rule.suffix, value: rule.servers.joined(separator: ", "))
                 }
-                Entry("Пароль VPN") {
-                    SecureField("Введите пароль", text: $model.password)
-                        .accessibilityLabel("Пароль VPN")
+                Entry(L("Пароль VPN")) {
+                    SecureField(L("Введите пароль"), text: $model.password)
+                        .accessibilityLabel(L("Пароль VPN"))
                 }
-                Toggle("Сохранять пароль в Связке ключей", isOn: Binding(
+                Toggle(L("Сохранять пароль в Связке ключей"), isOn: Binding(
                     get: { model.profile.remember }, set: { model.setRemember($0) }
                 ))
             }
             .textFieldStyle(.roundedBorder)
             .disabled(model.busy)
             HStack {
-                Button("Сохранить профиль") { model.saveProfile() }
+                Button(L("Сохранить профиль")) { model.saveProfile() }
                 .disabled(model.busy)
                 if let notice = model.notice { Text(notice).font(.caption).foregroundStyle(.secondary) }
                 Spacer()
-                Button("Удалить профиль…", role: .destructive) { profileToDelete = selected }
+                Button(L("Удалить профиль…"), role: .destructive) { profileToDelete = selected }
                     .disabled(model.busy)
-                    .confirmationDialog("Удалить профиль?", isPresented: Binding(
+                    .confirmationDialog(L("Удалить профиль?"), isPresented: Binding(
                         get: { profileToDelete != nil },
                         set: { if !$0 { profileToDelete = nil } }
                     ), titleVisibility: .visible, presenting: profileToDelete) { target in
-                        Button("Удалить", role: .destructive) { model.deleteProfile(target.id) }
-                        Button("Отмена", role: .cancel) {}
+                        Button(L("Удалить"), role: .destructive) { model.deleteProfile(target.id) }
+                        Button(L("Отмена"), role: .cancel) {}
                     } message: { target in
-                        Text("Профиль «\(target.name)», его маршруты и сохранённый пароль будут удалены.")
+                        Text(L("Профиль «\(target.displayName)», его маршруты и сохранённый пароль будут удалены."))
                     }
             }
         }
@@ -274,8 +284,8 @@ struct VPNWindow: View {
     private func certificates(for selected: SavedProfile) -> some View {
         VStack(alignment: .leading, spacing: 16) {
             Panel {
-                Text("Проверка сервера · \(selected.name)").font(.headline)
-                Picker("Источник доверия", selection: Binding(
+                Text(L("Проверка сервера · \(selected.displayName)")).font(.headline)
+                Picker(L("Источник доверия"), selection: Binding(
                     get: { model.profile.trustMode }, set: { model.setTrustMode($0) }
                 )) {
                     ForEach(ServerTrustMode.allCases) { mode in
@@ -284,8 +294,8 @@ struct VPNWindow: View {
                 }
                 .disabled(model.busy)
                 Text(model.profile.trustMode == .system
-                     ? "macOS проверяет имя сервера и цепочку сертификатов при подключении."
-                     : "Приложение проверяет имя сервера и использует корневые CA из общего комплекта.")
+                     ? L("macOS проверяет имя сервера и цепочку сертификатов при подключении.")
+                     : L("Приложение проверяет имя сервера и использует корневые CA из общего комплекта."))
                     .foregroundStyle(.secondary)
             }
             if model.profile.trustMode == .custom { customCertificates }
@@ -296,24 +306,24 @@ struct VPNWindow: View {
         Panel {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Общий комплект CA")
+                    Text(L("Общий комплект CA"))
                         .font(.headline)
                     Text(model.customBundle
-                         ? "Используется всеми профилями, в которых выбран этот источник доверия."
-                         : "Добавьте корневой сертификат вашего центра сертификации.")
+                         ? L("Используется всеми профилями, в которых выбран этот источник доверия.")
+                         : L("Добавьте корневой сертификат вашего центра сертификации."))
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Menu("Обновить CA…") {
-                    Button("Добавить сертификаты…") { model.importCertificates(append: true) }
-                    Button("Заменить весь комплект…") { model.importCertificates(append: false) }
+                Menu(L("Обновить CA…")) {
+                    Button(L("Добавить сертификаты…")) { model.importCertificates(append: true) }
+                    Button(L("Заменить весь комплект…")) { model.importCertificates(append: false) }
                 }
                 .fixedSize()
                 .disabled(model.busy)
             }
             if model.certificates.isEmpty {
-                Text("Загрузите рабочий комплект сертификатов CA.").foregroundStyle(.secondary)
+                Text(L("Загрузите рабочий комплект сертификатов CA.")).foregroundStyle(.secondary)
             }
             ForEach(model.certificates) { item in
                 Divider()
@@ -326,17 +336,17 @@ struct VPNWindow: View {
                              item.expires.formatted(date: .abbreviated, time: .omitted))
                         .font(.caption).foregroundStyle(.secondary)
                         if !item.current {
-                            Text("Вне срока действия").font(.caption).foregroundStyle(.red)
+                            Text(L("Вне срока действия")).font(.caption).foregroundStyle(.red)
                         } else if item.expiring {
-                            Text("Истекает в течение 30 дней").font(.caption).foregroundStyle(.orange)
+                            Text(L("Истекает в течение 30 дней")).font(.caption).foregroundStyle(.orange)
                         }
                     }
                     Spacer(minLength: 0)
                     Button(role: .destructive) { model.removeCertificate(item) } label: {
                         Image(systemName: "trash")
                     }
-                    .help("Удалить из общего комплекта")
-                    .accessibilityLabel("Удалить \(item.subject)")
+                    .help(L("Удалить из общего комплекта"))
+                    .accessibilityLabel(L("Удалить \(item.subject)"))
                     .disabled(model.busy || model.certificates.count <= 1)
                 }
             }
@@ -347,23 +357,23 @@ struct VPNWindow: View {
     private var journal: some View {
         Panel {
             HStack {
-                Text("События подключения").font(.headline)
+                Text(L("События подключения")).font(.headline)
                 Spacer()
-                Button("Скопировать") {
+                Button(L("Скопировать")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(model.logs.joined(separator: "\n"), forType: .string)
                 }.disabled(model.logs.isEmpty)
-                Button("Очистить") { model.clearLog() }.disabled(model.logs.isEmpty)
+                Button(L("Очистить")) { model.clearLog() }.disabled(model.logs.isEmpty)
             }
             if model.profile.fullTunnel == true && model.library.selected != nil {
-                Toggle("Проверять интернет через Cloudflare после подключения", isOn: Binding(
+                Toggle(L("Проверять интернет через Cloudflare после подключения"), isOn: Binding(
                     get: { model.profile.diagnoseInternet == true },
                     set: { model.profile.diagnoseInternet = $0 }
                 ))
                 .disabled(model.busy)
             }
             if model.logs.isEmpty {
-                Text("Записей пока нет.").foregroundStyle(.secondary).padding(.vertical, 20)
+                Text(L("Записей пока нет.")).foregroundStyle(.secondary).padding(.vertical, 20)
             } else {
                 ScrollViewReader { proxy in
                     ScrollView {
@@ -395,7 +405,7 @@ struct VPNWindow: View {
                 }
             }
             Spacer()
-            Button(model.busy ? (model.state == .connecting ? "Отменить" : "Отключить") : "Подключить") {
+            Button(model.busy ? (model.state == .connecting ? L("Отменить") : L("Отключить")) : L("Подключить")) {
                 if model.busy { model.disconnect() }
                 else { model.connect() }
             }
@@ -418,20 +428,20 @@ private struct WindowsImportSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Импорт из Windows").font(.title2.bold())
-            Text("Вставьте профиль SSTP, маршруты и DNS-правила PowerShell или откройте файл .ps1. Логин и пароль вводятся после импорта.")
+            Text(L("Импорт из Windows")).font(.title2.bold())
+            Text(L("Вставьте профиль SSTP, маршруты и DNS-правила PowerShell или откройте файл .ps1. Логин и пароль вводятся после импорта."))
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             TextEditor(text: $script)
                 .font(.system(.body, design: .monospaced))
-                .accessibilityLabel("Команды PowerShell")
+                .accessibilityLabel(L("Команды PowerShell"))
                 .frame(minHeight: 195)
                 .border(Color.secondary.opacity(0.3))
             if let issue {
                 Text(issue).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
             HStack {
-                Button("Открыть файл…") {
+                Button(L("Открыть файл…")) {
                     do {
                         if let text = try model.openWindowsConfig() {
                             script = text
@@ -440,8 +450,8 @@ private struct WindowsImportSheet: View {
                     } catch { issue = error.localizedDescription }
                 }
                 Spacer()
-                Button("Отмена", role: .cancel) { dismiss() }
-                Button("Импортировать") {
+                Button(L("Отмена"), role: .cancel) { dismiss() }
+                Button(L("Импортировать")) {
                     do {
                         try model.importWindows(script)
                         dismiss()
@@ -495,44 +505,45 @@ private struct RoutePage: View {
         Panel {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Трафик через VPN").font(.headline)
-                    Text("IPv4-адреса и подсети для текущего профиля.")
+                    Text(L("Трафик через VPN")).font(.headline)
+                    Text(L("IPv4-адреса и подсети для текущего профиля."))
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                Button("Править списком…") {
+                Button(L("Править списком…")) {
                     bulk = model.profile.routes
                     inputError = nil
                     showBulk = true
                 }
                 .disabled(model.busy)
             }
-            Toggle("Весь интернет-трафик IPv4 через VPN", isOn: Binding(
+            Toggle(L("Весь интернет-трафик IPv4 через VPN"), isOn: Binding(
                 get: { model.profile.fullTunnel == true }, set: { model.setFullTunnel($0) }
             ))
             .disabled(model.busy)
             if model.profile.fullTunnel == true {
-                Text("На время подключения обычный выход по IPv6 блокируется. Для смены внешнего IP сервер должен выпускать трафик в интернет.")
+                Text(L("На время подключения обычный выход по IPv6 блокируется. Для смены внешнего IP сервер должен выпускать трафик в интернет."))
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
             HStack {
-                Picker("Тип маршрута", selection: $kind) {
-                    Text("IP-адрес").tag("host")
-                    Text("Подсеть").tag("net")
+                Picker(L("Тип маршрута"), selection: $kind) {
+                    Text(L("IP-адрес")).tag("host")
+                    Text(L("Подсеть")).tag("net")
                 }
+                .pickerStyle(.segmented)
                 .labelsHidden()
-                .frame(width: 113)
+                .fixedSize(horizontal: true, vertical: false)
                 TextField(kind == "host" ? "10.1.1.3" : "10.20.30.0/24", text: $address)
-                    .accessibilityLabel("Адрес маршрута")
+                    .accessibilityLabel(L("Адрес маршрута"))
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { add(routes) }
-                Button("Добавить") { add(routes) }.disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
+                Button(L("Добавить")) { add(routes) }.disabled(address.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             .disabled(model.busy)
             Divider()
             if routes.isEmpty {
-                Text("Список маршрутов пуст.").foregroundStyle(.secondary)
+                Text(L("Список маршрутов пуст.")).foregroundStyle(.secondary)
             }
             ForEach(routes, id: \.self) { route in
                 HStack {
@@ -540,7 +551,7 @@ private struct RoutePage: View {
                         .frame(width: 22)
                         .foregroundStyle(.secondary)
                     Text(route.destination).font(.system(.body, design: .monospaced))
-                    Text(route.kind == "host" ? "IP-адрес" : "Подсеть")
+                    Text(route.kind == "host" ? L("IP-адрес") : L("Подсеть"))
                         .font(.caption).foregroundStyle(.secondary)
                     Spacer()
                     Button(role: .destructive) {
@@ -548,27 +559,27 @@ private struct RoutePage: View {
                     } label: {
                         Image(systemName: "trash")
                     }
-                    .help("Удалить \(route.destination)")
-                    .accessibilityLabel("Удалить \(route.destination)")
+                    .help(L("Удалить \(route.destination)"))
+                    .accessibilityLabel(L("Удалить \(route.destination)"))
                     .disabled(model.busy)
                 }
             }
         }
         .sheet(isPresented: $showBulk) {
             VStack(alignment: .leading, spacing: 12) {
-                Text("Список маршрутов IPv4").font(.title2.bold())
-                Text("Один маршрут на строку. Форматы: host 10.1.1.3 и net 10.20.30.0/24.")
+                Text(L("Список маршрутов IPv4")).font(.title2.bold())
+                Text(L("Один маршрут на строку. Форматы: host 10.1.1.3 и net 10.20.30.0/24."))
                     .foregroundStyle(.secondary)
                 TextEditor(text: $bulk)
                     .font(.system(.body, design: .monospaced))
-                    .accessibilityLabel("Список маршрутов")
+                    .accessibilityLabel(L("Список маршрутов"))
                     .frame(height: 190)
                     .border(Color.secondary.opacity(0.3))
                 if let inputError { Text(inputError).font(.callout).foregroundStyle(.red) }
                 HStack {
                     Spacer()
-                    Button("Отмена", role: .cancel) { showBulk = false }
-                    Button("Сохранить") {
+                    Button(L("Отмена"), role: .cancel) { showBulk = false }
+                    Button(L("Сохранить")) {
                         do {
                             try model.replaceRoutes(VPNRoute.parse(bulk))
                             showBulk = false
@@ -586,7 +597,7 @@ private struct RoutePage: View {
         guard !model.busy else { return }
         do {
             let value = try VPNRoute.parse(kind + " " + address)
-            guard value.count == 1 else { throw Failure("Укажите один адрес или одну подсеть.") }
+            guard value.count == 1 else { throw Failure(L("Укажите один адрес или одну подсеть.")) }
             let updated = try VPNRoute.parse((routes + value).map(\.description).joined(separator: "\n"))
             try model.replaceRoutes(updated)
             address = ""
