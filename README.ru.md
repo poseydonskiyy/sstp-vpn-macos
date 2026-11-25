@@ -10,7 +10,7 @@
 | --- | --- |
 | [![Маршруты и полный туннель](docs/screenshots/routes-ru.png)](docs/screenshots/routes-ru.png) | [![Импорт профиля из Windows](docs/screenshots/import-ru.png)](docs/screenshots/import-ru.png) |
 
-На скриншотах показана двуязычная сборка в разработке с демонстрационным профилем.
+На скриншотах показан русский интерфейс с демонстрационным профилем.
 
 ## Установка и первый запуск
 

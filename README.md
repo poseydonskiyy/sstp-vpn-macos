@@ -10,7 +10,7 @@ A native macOS client for SSTP VPNs using PPP authentication. The Universal app 
 | --- | --- |
 | [![Routes and full-tunnel settings](docs/screenshots/routes-en.png)](docs/screenshots/routes-en.png) | [![Windows PowerShell import](docs/screenshots/import-en.png)](docs/screenshots/import-en.png) |
 
-These screenshots show the bilingual development build with a sample profile.
+The screenshots show the English interface with a sample profile.
 
 ## Install and connect
 
