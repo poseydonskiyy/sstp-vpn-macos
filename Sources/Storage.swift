@@ -42,6 +42,8 @@ struct ProfileLibrary: Codable {
             }) {
                 profiles[index].settings.routes = item.settings.routes
                 profiles[index].settings.pppEncryption = item.settings.pppEncryption
+                profiles[index].settings.pppAuthentication = item.settings.pppAuthentication
+                profiles[index].settings.idleDisconnectSeconds = item.settings.idleDisconnectSeconds
                 profiles[index].settings.fullTunnel = item.settings.fullTunnel
                 profiles[index].settings.dnsSuffix = item.settings.dnsSuffix
                 profiles[index].settings.dnsRules = item.settings.dnsRules

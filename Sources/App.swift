@@ -211,6 +211,30 @@ struct VPNWindow: View {
                     TextField("user@example.com", text: $model.profile.login)
                         .accessibilityLabel("Логин VPN")
                 }
+                Menu("Метод PPP · \(model.profile.authentication.map(\.title).joined(separator: ", "))") {
+                    ForEach(PPPAuthentication.allCases) { method in
+                        Toggle(method.title, isOn: Binding(
+                            get: { model.profile.authentication.contains(method) },
+                            set: { enabled in
+                                var selected = Set(model.profile.authentication)
+                                if enabled { selected.insert(method) } else { selected.remove(method) }
+                                if !selected.isEmpty {
+                                    model.profile.pppAuthentication = PPPAuthentication.allCases.filter { selected.contains($0) }
+                                }
+                            }
+                        ))
+                        .disabled(model.profile.authentication == [method])
+                    }
+                    Divider()
+                    Picker("Шифрование внутри PPP", selection: Binding(
+                        get: { model.profile.pppEncryption ?? .optional },
+                        set: { model.profile.pppEncryption = $0 }
+                    )) {
+                        ForEach(PPPEncryption.allCases) { level in
+                            Text(level.title).tag(level)
+                        }
+                    }
+                }
                 if let suffix = model.profile.dnsSuffix {
                     LabeledContent("DNS-суффикс", value: suffix)
                 }

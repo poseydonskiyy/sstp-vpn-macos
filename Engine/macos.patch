@@ -279,7 +279,7 @@
  
      /*< The time pppd was terminated */
      unsigned long t_end;
-@@ -86,10 +87,77 @@
+@@ -86,10 +87,85 @@
  
      /*< First read from pppd */
      bool first;
@@ -301,6 +301,7 @@
 +    static const char *const authentication[] = {
 +        NULL, "Challenge", "Response", "Success", "Failure",
 +    };
++    static const char *const pap[] = { NULL, "Request", "Ack", "Nak" };
 +    const char *protocol;
 +    const char *message;
 +    unsigned int bit;
@@ -336,6 +337,13 @@
 +            message = authentication[type];
 +            bit = 8 + type - 1;
 +            break;
++        case PPP_PROTO_PAP:
++            if (type >= sizeof(pap) / sizeof(pap[0]))
++                return;
++            protocol = "PAP";
++            message = pap[type];
++            bit = 18 + type - 1;
++            break;
 +        case 0x8021: /* IPCP */
 +            if (type > 6)
 +                return;
@@ -357,7 +365,165 @@
  
  
  /*!
-@@ -377,6 +445,7 @@
+@@ -215,98 +291,61 @@
+ /*!
+  * @brief Intercept any CHAP / PAP authentication with the peer.
+  */
+-static void sstp_pppd_check_auth(sstp_pppd_st* ctx, sstp_buff_st *tx)
+-{
+-    ppp_hdr_st *hdr; 
+-    uint8_t *buf = sstp_pkt_data(tx);
+-    uint16_t proto;
+-    bool pcomp;
+-    
+-	/* Skip HDLC header */
+-    if (buf[0] == 0xFF && buf[1] == 0x03) 
++static void sstp_pppd_check_auth(sstp_pppd_st *ctx, const uint8_t *buf, int len)
++{
++    if (len >= 2 && buf[0] == 0xff && buf[1] == 0x03)
+     {
+         buf += 2;
+-    }
+-
+-    /* Get protocol, account for protocol compression 
+-     * NOTE:
+-     *   We don't track the LCP configuration protocol and if pcomp has been specified. We'll make an educated guess as far as
+-     *   trying to parse it here. CHAPv2 (0xC223), or EAP (0xC227) both has LSB set to 0 meaning we read both bytes.
+-     */
+-    pcomp = (buf[0] & 0x01);
+-    proto = pcomp ? buf[0] : buf[0] << 8 | buf[1];
+-    buf  += (pcomp) ? 1 : 2;
+-
+-    hdr = (ppp_hdr_st*) buf;
+-    buf += sizeof(ppp_hdr_st);
+-
+-    /* Check if we have received the MS-CHAPv2(0xC223) credentials */
+-    switch (proto)
+-    {
+-    case PPP_PROTO_CHAP:
+-
+-        /* At this point, calculate the MPPE key ourselves */
+-        if (hdr->code == CHAP_RESPONSE &&
+-            buf[0] == MSCHAP_VALUE_LEN)
+-        {
+-            memcpy(&ctx->chap, &buf[1], sizeof(sstp_chap_st));
++        len -= 2;
++    }
++
++    if (len < 6 || (buf[0] & 1))
++        return;
++
++    uint16_t protocol = (uint16_t)buf[0] << 8 | buf[1];
++    uint8_t code = buf[2];
++    int packet_len = ((int)buf[4] << 8) | buf[5];
++    if (packet_len < 4 || packet_len > len - 2)
++        return;
++
++    buf += 6;
++    int payload = packet_len - 4;
++    if (protocol == PPP_PROTO_CHAP && code == CHAP_RESPONSE && payload >= 1)
++    {
++        if (buf[0] == MSCHAP_VALUE_LEN && payload >= 1 + MSCHAP_VALUE_LEN)
++        {
++            memcpy(&ctx->chap, &buf[1], sizeof(ctx->chap));
+             if (ctx->notify)
+-            {
+                 ctx->notify(ctx->arg, SSTP_PPP_AUTH);
+-            }
+- 
++        }
++        else if (buf[0] != 16 || payload < 17)
++        {
++            return;
++        }
++        /* CHAP-MD5 provides no MPPE key. The SSTP state keeps its zero HLAK. */
++        ctx->auth_done = 1;
++        sstp_pppd_deltmp(ctx);
++    }
++    else if (protocol == PPP_PROTO_PAP && code == 1 && payload >= 2)
++    {
++        /* PAP also leaves the HLAK at zero. IPCP follows successful PPP auth. */
++        ctx->auth_done = 1;
++        sstp_pppd_deltmp(ctx);
++    }
++    else if (protocol == PPP_PROTO_EAP && code == EAP_RESPONSE && payload >= 1)
++    {
++        if (buf[0] == EAPT_TLS)
++            sstp_die("EAP TLS not supported in this mode", -1);
++        if (buf[0] == EAPT_MSCHAPV2 && payload >= 6 + MSCHAP_VALUE_LEN &&
++            buf[1] == CHAP_RESPONSE && buf[5] == MSCHAP_VALUE_LEN)
++        {
++            memcpy(&ctx->chap, &buf[6], sizeof(ctx->chap));
++            if (ctx->notify)
++                ctx->notify(ctx->arg, SSTP_PPP_AUTH);
+             ctx->auth_done = 1;
+-            break;
+-        }
+-
+-        if (hdr->code == CHAP_FAILURE)
+-        {
+-            log_info("CHAP authentication failed");
+-            break;
+-        }
+-        
+-        sstp_pppd_deltmp(ctx);
+-        break;
+-
+-    case PPP_PROTO_EAP:
+-    
+-        /* EAP_RESPONSE, and if MSCHAPv2; calculate the MPPE keys */
+-        if (hdr->code == EAP_RESPONSE) 
+-        {
+-            if (buf[0] == EAPT_MSCHAPV2) 
+-            {
+-                if (buf[1] == CHAP_RESPONSE && 
+-                    buf[5] == MSCHAP_VALUE_LEN)
+-                {
+-                    memcpy(&ctx->chap, &buf[6], sizeof(sstp_chap_st));
+-                    if (ctx->notify) 
+-                    {
+-                        ctx->notify(ctx->arg, SSTP_PPP_AUTH);
+-                    }
+-                    ctx->auth_done = 1;
+-                    break;
+-                }
+-            }
+-            if (buf[0] == EAPT_TLS) {
+-                sstp_die("EAP TLS not supported in this mode", -1);
+-            }
+-        }
+-        
+-        break;
+-
+-    case PPP_PROTO_PAP:
+-        
+-        sstp_pppd_deltmp(ctx);
+-
+-        /* Flag that auth is done, MPPE keys are all zero */
+-        ctx->auth_done = 1;
+-
+-    default:
+-
+-        break;
+-    }
+-}
+-
++        }
++    }
++}
+ 
+ /*!
+  * @brief Process any data in the input buffer and forward them to server
+@@ -368,7 +407,7 @@
+         /* If plugin is not enabled, then we need to check for auth */
+         if (ctx->auth_check && !ctx->auth_done) 
+         {
+-            sstp_pppd_check_auth(ctx, tx);
++            sstp_pppd_check_auth(ctx, sstp_pkt_data(tx), max);
+         }
+ 
+         /* If plugin is not enabled, then we need to send ip-up */
+@@ -377,6 +416,7 @@
              sstp_pppd_ipup(ctx, tx);
          }
  
@@ -365,7 +531,7 @@
          sstp_pkt_trace(tx, SSTP_DIR_SEND);
  
          /* Send a PPP frame */
-@@ -462,6 +531,8 @@
+@@ -462,6 +502,8 @@
      int flen = 0;
      int ret  = 0;
  
@@ -374,7 +540,7 @@
      /* Get the maximum size of the frame */
      flen = (len << 1) + 4;
  
-@@ -509,7 +580,7 @@
+@@ -509,7 +551,7 @@
      /* Launch PPPd, unless PPPd launched us */
      if (!(SSTP_OPT_NOLAUNCH & opts->enable))
      {
@@ -383,7 +549,7 @@
          int i = 0;
          int j = 0;
          char speed[10];
-@@ -539,34 +610,44 @@
+@@ -539,34 +581,44 @@
          /* Write the password to file */
          if (opts->password)
          {

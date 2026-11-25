@@ -502,14 +502,16 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         "--user", profile.login, "--priv-dir", jail.path,
         "--log-stderr", "--log-level", "3", "--tls-ext", "\(target):\(profile.port)",
         "linkname", link, "nodetach", "logfd", "2", fullTunnel ? "defaultroute" : "nodefaultroute",
-        "noauth", "refuse-eap", "refuse-pap",
-        "refuse-chap", "refuse-mschap", "mtu", "1400", "mru", "1400",
+        "noauth", "mtu", "1400", "mru", "1400",
     ]
+    arguments += profile.authenticationOptions
+    if let idle = profile.idleDisconnectSeconds, idle > 0 { arguments += ["idle", String(idle)] }
     if requestPeerDNS { arguments.append("usepeerdns") }
     arguments += profile.pppEncryption?.options ?? []
     process.arguments = arguments
     trace.event("L4 TCP", "Начинается соединение с \(target):\(profile.port).", next: .tcp)
     trace.event("TLS", "Проверка сертификата · \(profile.trustMode.title).")
+    trace.event("L2 PPP", "Методы аутентификации · \(profile.authentication.map(\.title).joined(separator: ", ")).")
     try passwordPipe.fileHandleForWriting.write(contentsOf: Data((request.password + "\n").utf8))
     try passwordPipe.fileHandleForWriting.close()
     try process.run()
@@ -518,7 +520,7 @@ private func run(_ request: VPNRequest, stop: StopSignal) throws {
         try stop.check()
         guard process.isRunning else {
             _ = logDrain?.wait(timeout: .now() + .milliseconds(350))
-            throw Failure("sstpc завершился (код \(process.terminationStatus)). Этап: \(trace.pendingLabel).")
+            throw Failure(trace.exitMessage(process.terminationStatus))
         }
         if let found = currentPPP(link) {
             tunnel = found

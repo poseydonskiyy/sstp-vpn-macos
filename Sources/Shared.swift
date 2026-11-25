@@ -62,8 +62,19 @@ struct VPNRoute: Codable, Hashable {
     }
 }
 
-enum PPPEncryption: String, Codable {
+enum PPPEncryption: String, Codable, CaseIterable, Identifiable {
     case none, optional, required, maximum
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .none: "Выключено"
+        case .optional: "По согласованию"
+        case .required: "Обязательно"
+        case .maximum: "Обязательно (128 бит)"
+        }
+    }
 
     var options: [String] {
         switch self {
@@ -71,6 +82,28 @@ enum PPPEncryption: String, Codable {
         case .optional: []
         case .required: ["require-mppe"]
         case .maximum: ["require-mppe-128"]
+        }
+    }
+}
+
+enum PPPAuthentication: String, Codable, CaseIterable, Identifiable {
+    case mschapv2, chap, pap
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .mschapv2: "MS‑CHAPv2"
+        case .chap: "CHAP"
+        case .pap: "PAP"
+        }
+    }
+
+    var refusalOption: String {
+        switch self {
+        case .mschapv2: "refuse-mschap-v2"
+        case .chap: "refuse-chap"
+        case .pap: "refuse-pap"
         }
     }
 }
@@ -108,6 +141,8 @@ struct Profile: Codable {
     var routes = ""
     var remember = false
     var pppEncryption: PPPEncryption?
+    var pppAuthentication: [PPPAuthentication]?
+    var idleDisconnectSeconds: UInt32?
     var serverTrust: ServerTrustMode?
     var fullTunnel: Bool?
     var diagnoseInternet: Bool?
@@ -116,6 +151,22 @@ struct Profile: Codable {
     var dnsSuffix: String?
     var dnsRules: [DNSRule]?
     var trustMode: ServerTrustMode { serverTrust ?? .system }
+    var authentication: [PPPAuthentication] { pppAuthentication ?? [.mschapv2] }
+    var authenticationOptions: [String] {
+        ["refuse-eap", "refuse-mschap"] + PPPAuthentication.allCases
+            .filter { !authentication.contains($0) }.map(\.refusalOption)
+    }
+
+    func validateAuthentication() throws {
+        guard !authentication.isEmpty, Set(authentication).count == authentication.count else {
+            throw Failure("Выберите хотя бы один метод аутентификации PPP.")
+        }
+        if pppEncryption == .required || pppEncryption == .maximum {
+            guard authentication.contains(.mschapv2) else {
+                throw Failure("Шифрование PPP Required или Maximum требует MS‑CHAPv2. Проверьте EncryptionLevel в профиле Windows.")
+            }
+        }
+    }
     var usesSystemRouteForServer: Bool { fullTunnel != true && useSystemRouteForServer == true }
 
     func transportIPv4() throws -> String? {
@@ -169,6 +220,7 @@ struct VPNRequest: Codable {
 
     func validate() throws -> [VPNRoute] {
         try profile.validateEndpoint()
+        try profile.validateAuthentication()
         _ = try profile.transportIPv4()
         if let suffix = profile.dnsSuffix { _ = try Profile.normalizedDNSSuffix(suffix) }
         _ = try profile.validatedDNSRules()
